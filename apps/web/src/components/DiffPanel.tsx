@@ -1149,7 +1149,7 @@ export default function DiffPanel({
                   />
                 </div>
                 {fileTreeOpen ? (
-                  <aside className="flex w-[min(8rem,20%)] min-w-20 shrink-0 border-l border-border/60">
+                  <aside className="flex w-[min(10rem,25%)] min-w-25 shrink-0 border-l border-border/60">
                     <DiffFileTree
                       ariaLabel={`${reviewSectionTitle} files`}
                       entries={fileTreeEntries}

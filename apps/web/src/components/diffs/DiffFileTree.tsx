@@ -23,6 +23,28 @@ import {
 
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
+/**
+ * Diff trees sit in a narrow column, so the names get the room: the inline inset lines rows up
+ * with the "Files" label instead of Pierre's roomier default, and a flattened folder chain gives
+ * up its leading segments before the deepest one, which is the one that says where you are.
+ */
+const DIFF_TREE_UNSAFE_CSS = `${PIERRE_TREE_UNSAFE_CSS}
+  :host { --trees-padding-inline-override: 6px; }
+  [data-item-flattened-subitems] { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; }
+  [data-item-flattened-subitem] { flex: 0 1 auto; min-width: 1em; }
+  [data-item-flattened-subitem]:last-of-type { flex-shrink: 0.2; min-width: 2em; }
+`;
+
+/** The full path of the row under the pointer, since a narrow tree shortens its names. */
+function treeRowPath(event: { nativeEvent: Event }): string | null {
+  for (const node of event.nativeEvent.composedPath()) {
+    if (!(node instanceof HTMLElement)) continue;
+    const path = node.getAttribute("data-item-path");
+    if (path !== null) return path.replace(/\/$/, "");
+  }
+  return null;
+}
+
 interface DiffFileTreeProps {
   readonly entries: ReadonlyArray<DiffFileTreeEntry>;
   readonly onSelectFile: (path: string) => void;
@@ -81,7 +103,7 @@ export function DiffFileTree({
     paths: [],
     search: false,
     sort: ordering.sort,
-    unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
+    unsafeCSS: DIFF_TREE_UNSAFE_CSS,
   });
   const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
     areAllDirectoriesExpanded(currentModel, directoryPaths),
@@ -189,6 +211,13 @@ export function DiffFileTree({
       <FileTree
         model={model}
         aria-label={ariaLabel}
+        // A native title on the host, set as the pointer moves between rows: no React state, so
+        // hovering never re-renders the tree.
+        onPointerOver={(event) => {
+          const path = treeRowPath(event);
+          if (path === null) event.currentTarget.removeAttribute("title");
+          else if (event.currentTarget.title !== path) event.currentTarget.title = path;
+        }}
         onClickCapture={(event) => {
           if (
             event.defaultPrevented ||
