@@ -4344,11 +4344,20 @@ export default function Sidebar() {
   return (
     <>
       <ThreadContextDragGhost />
-      <SidebarChromeHeader isElectron={isElectron} />
+      {/* On desktop the search row is the titlebar row, beside the fixed
+          sidebar toggle; the chrome header only remains in the phone sheet. */}
+      <div className="md:hidden">
+        <SidebarChromeHeader isElectron={isElectron} />
+      </div>
       <SidebarContent
         className="min-h-full"
         fixedHeader={
-          <SidebarGroup className="z-[1]">
+          <SidebarGroup
+            className={cn(
+              "z-[1] md:h-[var(--workspace-topbar-height)] md:justify-center md:py-0 md:pl-[var(--workspace-titlebar-content-left)]",
+              isElectron && "drag-region",
+            )}
+          >
             <SidebarThreadHeader
               searchFieldRef={headerSearchRef}
               hasProjects={projectGroups.length > 0}
