@@ -114,9 +114,8 @@ vi.mock("./PullRequestThreadLinks", () => ({ PullRequestThreadLinks: () => null 
 vi.mock("./PullRequestSummaryTab", () => ({
   PullRequestSummaryTab: ({
     onFixFinding,
-    scrollerRef,
   }: ComponentProps<typeof import("./PullRequestSummaryTab").PullRequestSummaryTab>) => (
-    <div ref={scrollerRef} data-test-scroll="summary">
+    <div>
       <button
         onClick={() =>
           onFixFinding?.({
@@ -135,9 +134,8 @@ vi.mock("./PullRequestGuideTab", () => ({ PullRequestGuideTab: () => null }));
 vi.mock("./PullRequestCodeTab", () => ({
   default: ({
     onAddToAgentSelection,
-    scrollerRef,
   }: ComponentProps<typeof import("./PullRequestCodeTab").default>) => (
-    <div ref={scrollerRef} data-test-scroll="code">
+    <div>
       <button
         onClick={() =>
           onAddToAgentSelection?.({
@@ -356,83 +354,4 @@ describe.each([
       expect(newThread).toHaveBeenCalled();
     }
   });
-});
-
-it("changes the title only for the active tab's main scroller", async () => {
-  const scrollers = new Map<string, { scrollTop: number; scrollHeight: number }>();
-  await act(async () => {
-    renderer = create(
-      <PullRequestDetailPanel
-        environmentId={threadRef.environmentId}
-        reference={detail}
-        context="page"
-        shortcutsEnabled={false}
-        getShortcutContext={() => ({
-          terminalFocus: false,
-          terminalOpen: false,
-          previewFocus: false,
-          previewOpen: false,
-          isWeb: true,
-          isDesktop: false,
-        })}
-      />,
-      {
-        createNodeMock: (element) => {
-          const props = element.props as Record<string, unknown>;
-          const name = props["data-test-scroll"] as string | undefined;
-          if (name) {
-            const scroller = { scrollTop: 0, scrollHeight: 300 };
-            scrollers.set(name, scroller);
-            return scroller;
-          }
-          return { scrollHeight: props.inert === false ? 100 : 20 };
-        },
-      },
-    );
-  });
-
-  const mainScroll = renderer.root.findByProps({
-    className: "relative flex min-h-0 flex-1 flex-col overflow-hidden",
-  });
-  const titleFold = () => {
-    let node = renderer.root.findByType("h1");
-    while (typeof node.props.inert !== "boolean") node = node.parent!;
-    return node;
-  };
-  const summary = scrollers.get("summary")!;
-  const nested = { scrollTop: 200 };
-  await act(async () => mainScroll.props.onScrollCapture({ target: nested }));
-  expect(titleFold().props.inert).toBe(false);
-  summary.scrollTop = 180;
-  nested.scrollTop = 0;
-  await act(async () => {
-    mainScroll.props.onScrollCapture({ target: summary });
-    mainScroll.props.onScrollCapture({ target: nested });
-  });
-  expect(titleFold().props.inert).toBe(true);
-  expect(summary.scrollTop).toBe(100);
-  expect(nested.scrollTop).toBe(0);
-
-  await act(async () => mainScroll.props.onScrollCapture({ target: { scrollTop: 0 } }));
-  expect(titleFold().props.inert).toBe(true);
-  summary.scrollTop = 0;
-  await act(async () => mainScroll.props.onScrollCapture({ target: summary }));
-  expect(titleFold().props.inert).toBe(false);
-
-  await click("Code");
-  const code = scrollers.get("code")!;
-  summary.scrollTop = 180;
-  await act(async () => mainScroll.props.onScrollCapture({ target: summary }));
-  expect(titleFold().props.inert).toBe(false);
-  code.scrollTop = 180;
-  await act(async () => mainScroll.props.onScrollCapture({ target: code }));
-  expect(titleFold().props.inert).toBe(true);
-  expect(code.scrollTop).toBe(100);
-  await click("Summary");
-  expect(titleFold().props.inert).toBe(false);
-  await click("Code");
-  expect(titleFold().props.inert).toBe(true);
-  code.scrollTop = 0;
-  await act(async () => mainScroll.props.onScrollCapture({ target: code }));
-  expect(titleFold().props.inert).toBe(false);
 });

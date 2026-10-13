@@ -101,7 +101,6 @@ afterEach(() => {
 function render(value = detail) {
   return (
     <PullRequestSummaryTab
-      scrollerRef={() => {}}
       environmentId={EnvironmentId.make("environment")}
       threadRef={null}
       reference={value}
