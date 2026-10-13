@@ -35,7 +35,7 @@ export interface EnvironmentPullRequestError extends PullRequestListProjectError
   readonly environmentId: EnvironmentId;
 }
 
-export type PullRequestGroupKey = "reviewRequested" | "authored" | "others";
+export type PullRequestGroupKey = "reviewRequested" | "others";
 
 export interface PullRequestGroup<Entry extends PullRequestListEntry = PullRequestListEntry> {
   readonly key: PullRequestGroupKey;
@@ -62,7 +62,6 @@ const pullRequestViewerKey = (entry: ScopedEntry): string =>
 
 const GROUP_LABELS: Record<PullRequestGroupKey, string> = {
   reviewRequested: "Review requested",
-  authored: "Authored",
   others: "Others",
 };
 
@@ -201,19 +200,16 @@ export function groupPullRequestsByInvolvement<Entry extends ScopedEntry>(
 ): ReadonlyArray<PullRequestGroup<Entry>> {
   const buckets: Record<PullRequestGroupKey, Entry[]> = {
     reviewRequested: [],
-    authored: [],
     others: [],
   };
   for (const entry of entries) {
-    if (isAuthoredByViewer(entry, viewers)) {
-      buckets.authored.push(entry);
-    } else if (entry.viewerReviewRequested) {
+    if (entry.viewerReviewRequested) {
       buckets.reviewRequested.push(entry);
     } else {
       buckets.others.push(entry);
     }
   }
-  return (["authored", "reviewRequested", "others"] as const)
+  return (["reviewRequested", "others"] as const)
     .filter((key) => buckets[key].length > 0)
     .map((key) => ({ key, label: GROUP_LABELS[key], entries: buckets[key] }));
 }
@@ -372,28 +368,22 @@ export function retainVisiblePullRequestStatsBatches(
 }
 
 /**
- * The feed is sliced by recency, so an older authored or review-requested row can be
+ * The feed is sliced by recency, so an older review-requested row can be
  * missing from its first page and arrive with a later one; grouping the loaded pages would
  * then move it above rows already read.
  */
 export function partitionPullRequestsWithPriority<Entry extends PullRequestListEntry>(
   entries: ReadonlyArray<Entry>,
-  authored: ReadonlyArray<Entry>,
   reviewRequested: ReadonlyArray<Entry>,
 ): ReadonlyArray<PullRequestGroup<Entry>> {
-  const authoredByKey = new Map(authored.map((entry) => [pullRequestEntryKey(entry), entry]));
   const reviewByKey = new Map(
-    reviewRequested.flatMap((entry) => {
-      const key = pullRequestEntryKey(entry);
-      return authoredByKey.has(key) ? [] : [[key, entry] as const];
-    }),
+    reviewRequested.map((entry) => [pullRequestEntryKey(entry), entry] as const),
   );
   const others: Entry[] = [];
   for (const entry of entries) {
     const key = pullRequestEntryKey(entry);
-    if (authoredByKey.has(key)) {
-      authoredByKey.set(key, entry);
-    } else if (reviewByKey.has(key)) {
+    // The feed's copy of a partitioned row is at least as fresh — it replaces in place.
+    if (reviewByKey.has(key)) {
       reviewByKey.set(key, entry);
     } else {
       others.push(entry);
@@ -402,7 +392,6 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
   const byRecency = (left: Entry, right: Entry) => right.updatedAt.localeCompare(left.updatedAt);
   return (
     [
-      { key: "authored", entries: [...authoredByKey.values()].toSorted(byRecency) },
       { key: "reviewRequested", entries: [...reviewByKey.values()].toSorted(byRecency) },
       { key: "others", entries: others },
     ] as const
@@ -517,7 +506,6 @@ const snapshotStorageKey = (environmentSetKey: string) =>
   `t3.pullRequests.list:${environmentSetKey}`;
 
 export interface PullRequestPartitionsSnapshot {
-  readonly authored: ReadonlyArray<EnvironmentPullRequestEntry>;
   readonly reviewing: ReadonlyArray<EnvironmentPullRequestEntry>;
 }
 
@@ -549,7 +537,6 @@ const decodeSnapshot = Schema.decodeUnknownOption(
     }),
     partitions: Schema.optional(
       Schema.Struct({
-        authored: Schema.Array(EnvironmentPullRequestEntrySchema),
         reviewing: Schema.Array(EnvironmentPullRequestEntrySchema),
       }),
     ),
@@ -591,7 +578,6 @@ export function writePullRequestListSnapshot(
           ? {}
           : {
               partitions: {
-                authored: snapshot.partitions.authored.slice(0, SNAPSHOT_MAX_ENTRIES),
                 reviewing: snapshot.partitions.reviewing.slice(0, SNAPSHOT_MAX_ENTRIES),
               },
             }),
@@ -771,8 +757,7 @@ export function sortPullRequestGroups<Entry extends PullRequestListEntry>(
   }
   if (sort === "blocked") {
     if (searchText.trim().length > 0) return groups;
-    const role = (key: PullRequestGroupKey) =>
-      key === "others" ? involvement : key === "authored" ? "authored" : "reviewing";
+    const role = (key: PullRequestGroupKey) => (key === "others" ? involvement : "reviewing");
     return groups.map((group) => {
       const groupRole = role(group.key);
       if (groupRole === "all") return group;
@@ -893,8 +878,8 @@ const PULL_REQUEST_OVERRIDE_TRUST_MS = 60_000;
 /**
  * A read that started before the action can land after it and still say the old thing, so an
  * override is not cleared because an answer arrived but because the answer agrees: the row is
- * there in the state the override said. A row that is absent says nothing — the authored and
- * reviewing groups are read apart from the feed, and a page is only a page — so absence never
+ * there in the state the override said. A row that is absent says nothing — the review-requested
+ * group is read apart from the feed, and a page is only a page — so absence never
  * confirms.
  */
 export function settlePullRequestOverrides<Entry extends PullRequestListEntry>(

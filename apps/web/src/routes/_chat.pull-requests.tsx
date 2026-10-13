@@ -254,7 +254,7 @@ const MATCHED_ELSEWHERE_SCORE = 10;
 const PAGE_SIZE = 99;
 const MAX_PAGE_SIZE = 500;
 const EMPTY_VIEWERS: PullRequestListResult["viewers"] = {};
-const EMPTY_PARTITIONS: PullRequestPartitionsSnapshot = { authored: [], reviewing: [] };
+const EMPTY_PARTITIONS: PullRequestPartitionsSnapshot = { reviewing: [] };
 const NO_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> = [];
 const EMPTY_PREVIEW_SESSIONS = {};
 const EMPTY_PREVIEW_DESKTOP_STATE = {};
@@ -548,6 +548,8 @@ function PullRequestsRouteView() {
     }));
   })();
   const facetQuery = usePullRequestList(facetTargets);
+  // Only review requests are lifted out of the feed. Your own pull requests stay in its order:
+  // All is the timeline, and the Authored tab is where they stand alone.
   const partitionsWanted = search.involvement === "all" && typedQuery.length === 0;
   const partitionTargets = (() => {
     // The main list goes first. Besides putting the visible rows on screen sooner, it proves
@@ -558,7 +560,7 @@ function PullRequestsRouteView() {
       baselineQuery.data === null ||
       baselineQuery.data.entries.length === 0
     ) {
-      return { authored: NO_LIST_TARGETS, reviewing: NO_LIST_TARGETS };
+      return { reviewing: NO_LIST_TARGETS };
     }
     const targetsFor = (involvement: PullRequestInvolvement) =>
       environmentQueries.map(({ environmentId, projectIds }) => ({
@@ -573,9 +575,8 @@ function PullRequestsRouteView() {
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,
       }));
-    return { authored: targetsFor("authored"), reviewing: targetsFor("reviewing") };
+    return { reviewing: targetsFor("reviewing") };
   })();
-  const authoredQuery = usePullRequestList(partitionTargets.authored);
   const reviewingQuery = usePullRequestList(partitionTargets.reviewing);
   const invalidate = useAtomCommand(pullRequestEnvironment.invalidate, { reportFailure: false });
   const [detailRefreshToken, setDetailRefreshToken] = useState(0);
@@ -654,8 +655,8 @@ function PullRequestsRouteView() {
   const answeredPartitions =
     partitionsWanted && baselineEmpty
       ? EMPTY_PARTITIONS
-      : partitionsWanted && authoredQuery.data !== null && reviewingQuery.data !== null
-        ? { authored: authoredQuery.data.entries, reviewing: reviewingQuery.data.entries }
+      : partitionsWanted && reviewingQuery.data !== null
+        ? { reviewing: reviewingQuery.data.entries }
         : null;
   const heldPartitions =
     loaded !== null && loaded.environmentKey === environmentKey && loaded.scope === scopeKey
@@ -677,7 +678,6 @@ function PullRequestsRouteView() {
       loaded.scope !== scopeKey ||
       loaded.query !== sentQuery ||
       loaded.data.entries !== loadedEntries ||
-      loaded.partitions?.authored !== nextPartitions?.authored ||
       loaded.partitions?.reviewing !== nextPartitions?.reviewing)
   ) {
     setLoaded({
@@ -809,14 +809,7 @@ function PullRequestsRouteView() {
 
   const refreshList = (includeRelated = false, actedEnvironmentId?: EnvironmentId) => {
     const related = (
-      includeRelated
-        ? [
-            ...baselineTargets,
-            ...facetTargets,
-            ...partitionTargets.authored,
-            ...partitionTargets.reviewing,
-          ]
-        : []
+      includeRelated ? [...baselineTargets, ...facetTargets, ...partitionTargets.reviewing] : []
     ).filter(
       ({ environmentId }) =>
         actedEnvironmentId === undefined || environmentId === actedEnvironmentId,
@@ -895,7 +888,6 @@ function PullRequestsRouteView() {
       loaded !== null && loaded.environmentKey === environmentKey && loaded.scope === scopeKey
         ? loaded.partitions
         : undefined,
-    authored: partitionsWanted ? authoredQuery.data?.entries : undefined,
     reviewing: partitionsWanted ? reviewingQuery.data?.entries : undefined,
     partitionsWanted,
   });
@@ -1945,7 +1937,6 @@ function pullRequestGroups({
   answeredLocally,
   baselineEmpty,
   held,
-  authored,
   reviewing,
   partitionsWanted,
 }: {
@@ -1959,7 +1950,6 @@ function pullRequestGroups({
   answeredLocally: boolean;
   baselineEmpty: boolean;
   held: PullRequestPartitionsSnapshot | undefined;
-  authored: ReadonlyArray<EnvironmentPullRequestEntry> | undefined;
   reviewing: ReadonlyArray<EnvironmentPullRequestEntry> | undefined;
   partitionsWanted: boolean;
 }) {
@@ -2011,12 +2001,11 @@ function pullRequestGroups({
         : rows.filter((entry) =>
             matchesPullRequestFilters(entry, localFilters, pullRequestEntryViewer(entry, viewers)),
           );
-    const narrowedAuthored = narrow(partitionsWanted ? (authored ?? held?.authored) : undefined);
     const narrowedReviewing = narrow(partitionsWanted ? (reviewing ?? held?.reviewing) : undefined);
-    if (narrowedAuthored === undefined || narrowedReviewing === undefined) {
+    if (narrowedReviewing === undefined) {
       return groupPullRequestsByInvolvement(entries, viewers);
     }
-    return partitionPullRequestsWithPriority(entries, narrowedAuthored, narrowedReviewing);
+    return partitionPullRequestsWithPriority(entries, narrowedReviewing);
   })();
 
   const entriesByStatsKey: ReadonlyMap<string, EnvironmentPullRequestEntry> = new Map(
