@@ -59,6 +59,13 @@ export interface DiffLineStat {
   deletions: number;
 }
 
+const filePathCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** The order every diff lists its files in: by path, digits as numbers, ignoring case. */
+export function compareDiffFilePaths(left: string, right: string): number {
+  return filePathCollator.compare(left, right);
+}
+
 /** Files with fewer changed lines open expanded even when diffs default to collapsed. */
 export const DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES = 1200;
 

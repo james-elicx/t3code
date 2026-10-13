@@ -42,9 +42,9 @@ import { useTheme } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
 import { pullRequestFindingKey, type PullRequestFinding } from "./pullRequestDetail.logic";
 import { canEditPullRequestComment, canResolvePullRequestThread } from "./pullRequestEditing.logic";
-import { orderDiffFiles } from "./pullRequestFileOrder.logic";
 import {
   buildFileDiffRenderKey,
+  compareDiffFilePaths,
   DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES,
   fnv1a32,
   getDiffLineStat,
@@ -459,9 +459,11 @@ function PullRequestCodeTab({
       ignoreWhitespace,
     ),
   );
-  const files = parsedSlices.flatMap((parsed) =>
-    parsed?.kind === "files" ? orderDiffFiles(parsed.files) : [],
-  );
+  // Sorted like every other diff. The host hands slices out in path order, so a later slice lands
+  // below what has already loaded rather than pushing it down the page.
+  const files = parsedSlices
+    .flatMap((parsed) => (parsed?.kind === "files" ? parsed.files : []))
+    .toSorted((a, b) => compareDiffFilePaths(resolveFileDiffPath(a), resolveFileDiffPath(b)));
   const filePaths = files.map((file) => resolveFileDiffPath(file));
   const omittedFileStats = new Map(
     loadedSlices.flatMap((slice) =>
