@@ -67,6 +67,7 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   ArrowRightLeftIcon,
+  ArchiveIcon,
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -83,6 +84,7 @@ import {
   ShieldQuestionIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -1460,6 +1462,10 @@ type SidebarThreadRowProps = {
     event: PointerEvent,
   ) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
+  // Settled rows offer these beside Un-settle, so clearing out the tail
+  // does not need the context menu.
+  onArchive: (threadRef: ScopedThreadRef) => void;
+  onDelete: (threadRef: ScopedThreadRef) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
@@ -1473,6 +1479,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onCommitRename,
     onContextMenu,
     onAcknowledgeWoke,
+    onArchive,
+    onDelete,
     onFileDropThreads,
     onRenameTitleChange,
     onSettle,
@@ -1741,6 +1749,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     event.preventDefault();
     event.stopPropagation();
     onUnsettle(threadRef);
+  };
+  const handleArchiveClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onArchive(threadRef);
+  };
+  const handleDeleteClick = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onDelete(threadRef);
   };
   const handleUnsnoozeClick = (event: ReactMouseEvent) => {
     event.preventDefault();
@@ -2015,7 +2033,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             ) : (
               <span
                 className={cn(
-                  "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
+                  "group/sidebar-status-slot relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
                   props.sweepAction !== null && "hidden",
                 )}
               >
@@ -2023,6 +2041,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
                     !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                    // Settled rows show several actions, which take the
+                    // label's place in the row instead of covering the title.
+                    !isWoke &&
+                      variantAction === "unsettle" &&
+                      "group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -2073,27 +2096,60 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       <AlarmClockOffIcon className="mb-px size-3" />
                     </button>
                   )
-                ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          aria-label="Un-settle thread"
-                          onClick={handleUnsettleClick}
-                          onPointerDown={handleActionPointerDown}
-                          className={cn(
-                            "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                            isWoke && "group-any-hover/sidebar-row:static",
-                          )}
-                        />
-                      }
-                    >
-                      <Undo2Icon className="mb-px size-3.5" />
-                    </TooltipTrigger>
-                    <TooltipPopup side="top">Un-settle thread</TooltipPopup>
-                  </Tooltip>
-                ) : (
+                ) : variantAction === "unsettle" ? (
+                  <span className="pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Archive thread"
+                            onClick={handleArchiveClick}
+                            onPointerDown={handleActionPointerDown}
+                            className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          />
+                        }
+                      >
+                        <ArchiveIcon className="mb-px size-3.5" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">Archive thread</TooltipPopup>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Delete thread"
+                            onClick={handleDeleteClick}
+                            onPointerDown={handleActionPointerDown}
+                            className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-destructive-foreground"
+                          />
+                        }
+                      >
+                        <Trash2Icon className="mb-px size-3.5" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">Delete thread</TooltipPopup>
+                    </Tooltip>
+                    {props.settlementSupported ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              aria-label="Un-settle thread"
+                              onClick={handleUnsettleClick}
+                              onPointerDown={handleActionPointerDown}
+                              className="inline-flex cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                            />
+                          }
+                        >
+                          <Undo2Icon className="mb-px size-3.5" />
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">Un-settle thread</TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                  </span>
+                ) : !props.settlementSupported ? null : (
                   <button
                     type="button"
                     aria-label="Settle thread"
@@ -3985,6 +4041,62 @@ export default function Sidebar() {
     },
   );
 
+  // Shared by the thread context menu and the settled rows' quick actions.
+  const archiveSidebarThread = async (threadRef: ScopedThreadRef) => {
+    const api = readLocalApi();
+    const thread = threadByKeyRef.current.get(scopedThreadKey(threadRef));
+    if (!api || !thread) return;
+    if (confirmThreadArchive) {
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(`Archive thread "${thread.title}"?`),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+    }
+    let didArchive = false;
+    const result = await archiveThread(threadRef, {
+      onArchived: () => {
+        didArchive = true;
+      },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: didArchive ? "Thread archived, but navigation failed" : "Failed to archive thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  };
+  const deleteSidebarThread = async (threadRef: ScopedThreadRef) => {
+    const api = readLocalApi();
+    const thread = threadByKeyRef.current.get(scopedThreadKey(threadRef));
+    if (!api || !thread) return;
+    if (confirmThreadDelete) {
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(
+          [
+            `Delete thread "${thread.title}"?`,
+            "This permanently clears conversation history for this thread.",
+          ].join("\n"),
+          { variant: "destructive" },
+        ),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+    }
+    const result = await deleteThread(threadRef);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Failed to delete thread",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        }),
+      );
+    }
+  };
   const handleThreadContextMenu = useStableCallback(
     (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       void (async () => {
@@ -4187,61 +4299,12 @@ export default function Sidebar() {
           case "copy-thread-id":
             copyThreadIdToClipboard(thread.id, { threadId: thread.id });
             return;
-          case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(`Archive thread "${thread.title}"?`),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
-            let didArchive = false;
-            const result = await archiveThread(threadRef, {
-              onArchived: () => {
-                didArchive = true;
-              },
-            });
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: didArchive
-                    ? "Thread archived, but navigation failed"
-                    : "Failed to archive thread",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-              return;
-            }
+          case "archive":
+            await archiveSidebarThread(threadRef);
             return;
-          }
-          case "delete": {
-            if (confirmThreadDelete) {
-              const confirmed = await settlePromise(() =>
-                api.dialogs.confirm(
-                  [
-                    `Delete thread "${thread.title}"?`,
-                    "This permanently clears conversation history for this thread.",
-                  ].join("\n"),
-                  { variant: "destructive" },
-                ),
-              );
-              if (confirmed._tag === "Failure" || !confirmed.value) return;
-            }
-            const result = await deleteThread(threadRef);
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              toastManager.add(
-                stackedThreadToast({
-                  type: "error",
-                  title: "Failed to delete thread",
-                  description: error instanceof Error ? error.message : "An error occurred.",
-                }),
-              );
-              return;
-            }
+          case "delete":
+            await deleteSidebarThread(threadRef);
             return;
-          }
           default:
             return;
         }
@@ -4712,6 +4775,8 @@ export default function Sidebar() {
                             onSettle={attemptSettle}
                             onActionSweepStart={startActionSweep}
                             onUnsettle={attemptUnsettle}
+                            onArchive={archiveSidebarThread}
+                            onDelete={deleteSidebarThread}
                             onUnsnooze={attemptUnsnooze}
                             onUnpin={attemptUnpin}
                             onAcknowledgeWoke={acknowledgeWoke}
