@@ -60,9 +60,10 @@ function preview(
   active: string,
   over: string,
   scale = 1,
+  cardHeight?: number,
 ) {
   const strategy = createSidebarSortingStrategy(input);
-  const args = layout(input.items, active, over, scale);
+  const args = layout(input.items, active, over, scale, cardHeight);
   return new Map(
     input.items.map((item, index) => [sidebarListItemId(item), strategy({ ...args, index })]),
   );
@@ -507,8 +508,9 @@ describe("sidebar drag projection", () => {
       "a1",
       "p",
       2,
+      36,
     );
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(32 + 165);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(32 + 73);
   });
 
   it("keeps the pinned header above the first arriving pin", () => {
@@ -687,8 +689,8 @@ describe("sidebar drag projection", () => {
       0.75,
     );
     expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(62.5);
-    expect(result.get(sidebarMarkerId("active-placeholder"))?.y).toBe(62.5);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(28);
+    expect(result.get(sidebarMarkerId("active-placeholder"))?.y).toBe(28);
   });
 
   it("updates the projection when the target or measured geometry changes", () => {

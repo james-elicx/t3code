@@ -37,8 +37,16 @@ afterEach(async () => {
 });
 
 describe("composer focus state", () => {
+  it("opens resting", () => {
+    expect(isResting).toBe(true);
+  });
+
   it("stays expanded when the composer loses focus", async () => {
-    await act(() => composer.setIsComposerFocused(true));
+    // Interacting with the composer lifts the resting layout.
+    await act(() => {
+      composer.setIsComposerScrollCollapsed(false);
+      composer.setIsComposerFocused(true);
+    });
     expect(isResting).toBe(false);
 
     await act(() => composer.setIsComposerFocused(false));

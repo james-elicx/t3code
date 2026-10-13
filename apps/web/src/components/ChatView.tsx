@@ -3301,6 +3301,10 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.focusAtEnd();
   };
   const focusComposerStable = useStableCallback(focusComposer);
+  // Opening a thread keeps the composer resting; typing expands it.
+  const focusComposerRestingStable = useStableCallback(() => {
+    composerRef.current?.focusAtEndResting();
+  });
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
   const onInterrupt = async () => {
@@ -4519,12 +4523,12 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
-      focusComposerStable();
+      focusComposerRestingStable();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposerStable, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, focusComposerRestingStable, terminalUiState.terminalOpen]);
 
   useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
