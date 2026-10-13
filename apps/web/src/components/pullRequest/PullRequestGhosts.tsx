@@ -17,12 +17,10 @@ import { RelativeTime } from "~/components/RelativeTime";
 
 import { Button, InlineButton } from "../ui/button";
 import { MiddleTruncate } from "../ui/middle-truncate";
-import { PullRequestCopyableCode } from "./PullRequestCopyableCode";
 import {
   PullRequestChecksStatusLine,
-  PullRequestDetailHeaderBody,
+  PullRequestDetailMetaRow,
   PullRequestDetailTabBar,
-  PullRequestDetailTitleRow,
 } from "./PullRequestDetailLayout";
 import {
   PullRequestActorLabel,
@@ -78,24 +76,20 @@ export function PullRequestDetailGhost({
   seed: entry,
   summary,
   actions,
-  checkoutCommand,
   tabs = DEFAULT_DETAIL_TABS,
   activeTab,
   number,
   onBack,
   onClose,
-  onCheckoutError,
 }: {
   seed?: PullRequestListEntry | null;
   summary?: PullRequestSummary | null;
   actions?: ReactNode;
-  checkoutCommand?: string | null;
   tabs?: ReadonlyArray<{ value: string; label: string }>;
   activeTab?: string;
   number?: number;
   onBack?: (() => void) | undefined;
   onClose?: (() => void) | undefined;
-  onCheckoutError?: ((error: Error) => void) | undefined;
 }) {
   const seed = summary
     ? {
@@ -115,7 +109,6 @@ export function PullRequestDetailGhost({
     seed?.checksState === "failing" || seed?.checksState === "pending"
       ? pullRequestChecksStatePresentation(seed.checksState)
       : null;
-  const checkout = checkoutCommand ?? null;
   const changedFiles = summary?.changedFiles ?? null;
   const selectedTab =
     tabs.find((item) => item.value === activeTab)?.value ?? tabs[0]?.value ?? "summary";
@@ -145,7 +138,6 @@ export function PullRequestDetailGhost({
             ) : null}
             {seed ? (
               <>
-                <span className="min-w-0 truncate font-medium">{seed.repository}</span>
                 <InlineButton
                   onClick={() => void readLocalApi()?.shell.openExternal(seed.url)}
                   aria-label={`Open pull request #${seed.number} on host`}
@@ -153,11 +145,12 @@ export function PullRequestDetailGhost({
                   <span className={statePresentation?.toneClassName}>#{seed.number}</span>
                   <ExternalLinkIcon aria-hidden className="size-2.5" />
                 </InlineButton>
+                <span className="min-w-0 truncate font-medium text-foreground">{seed.title}</span>
               </>
             ) : (
               <>
-                <GhostBar className="w-24" />
                 <span className="shrink-0 text-xs text-muted-foreground">#{number ?? "…"}</span>
+                <GhostBar className="w-48" />
               </>
             )}
           </div>
@@ -179,97 +172,62 @@ export function PullRequestDetailGhost({
           ) : null}
         </div>
 
-        <div className="col-span-2 grid grid-rows-[1fr]">
-          <div className="min-h-0 overflow-hidden">
-            <PullRequestDetailHeaderBody
-              title={
-                <PullRequestDetailTitleRow>
-                  {seed ? (
-                    <h1 className="truncate text-base font-semibold leading-snug">{seed.title}</h1>
-                  ) : (
-                    <GhostBar className="h-5 w-4/5 max-w-md" />
-                  )}
-                </PullRequestDetailTitleRow>
-              }
-              author={
-                seed ? (
-                  <PullRequestActorLabel actor={seed.author ?? null} tooltip={false} />
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <GhostBar className="size-4 rounded-full" />
-                    <GhostBar className="h-3 w-14" />
-                  </span>
-                )
-              }
-              updated={
-                seed ? (
-                  <span>
-                    updated <RelativeTime timestamp={seed.updatedAt} />
-                  </span>
-                ) : (
-                  <GhostBar className="h-3 w-16" />
-                )
-              }
-              checkout={
-                checkout ? (
-                  <PullRequestCopyableCode
-                    key={checkout}
-                    value={checkout}
-                    target="pull request checkout command"
-                    copyLabel="Copy checkout command"
-                    copiedLabel="Checkout command copied"
-                    className="ml-auto font-mono"
-                    tooltipSide="bottom"
-                    {...(onCheckoutError ? { onError: onCheckoutError } : {})}
-                  />
-                ) : null
-              }
-              base={
-                <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
-                  {seed ? (
-                    <code className="flex min-w-0">
-                      <MiddleTruncate value={seed.baseBranch} />
-                    </code>
-                  ) : (
-                    <GhostBar className="h-3 w-12" />
-                  )}
-                </span>
-              }
-              head={
-                seed ? (
-                  <PullRequestCopyableCode
-                    key={seed.headBranch}
-                    value={seed.headBranch}
-                    target="branch name"
-                    copyLabel="Copy pull request branch"
-                    copiedLabel="Branch name copied"
-                    className="min-w-0 font-mono"
-                  />
-                ) : (
-                  <GhostBar className="h-3 w-32 flex-1" />
-                )
-              }
-              files={
-                changedFiles === null ? (
-                  <GhostBar className="h-3 w-10" />
-                ) : (
-                  `${changedFiles.toLocaleString()} ${changedFiles === 1 ? "file" : "files"}`
-                )
-              }
-              diffStat={
-                seed ? (
-                  <PullRequestDiffStat
-                    additions={seed.additions ?? 0}
-                    deletions={seed.deletions ?? 0}
-                    className="shrink-0 font-mono text-xs"
-                  />
-                ) : (
-                  <GhostBar className="h-3 w-20" />
-                )
-              }
-            />
-          </div>
-        </div>
+        {/* Mirrors the panel's compact row, so the detail lands without moving anything. */}
+        <PullRequestDetailMetaRow
+          author={
+            seed ? (
+              <PullRequestActorLabel
+                actor={seed.author ?? null}
+                variant="avatar"
+                tooltip={false}
+                className="shrink-0"
+              />
+            ) : (
+              <GhostBar className="size-4 rounded-full" />
+            )
+          }
+          updated={
+            seed ? (
+              <span className="shrink-0">
+                <RelativeTime timestamp={seed.updatedAt} />
+              </span>
+            ) : (
+              <GhostBar className="h-3 w-12" />
+            )
+          }
+          base={
+            seed ? (
+              <code className="flex min-w-0 max-w-[40%] shrink-0">
+                <MiddleTruncate value={seed.baseBranch} />
+              </code>
+            ) : (
+              <GhostBar className="h-3 w-12" />
+            )
+          }
+          head={
+            seed ? (
+              <code className="flex min-w-0 flex-1">
+                <MiddleTruncate value={seed.headBranch} />
+              </code>
+            ) : (
+              <GhostBar className="h-3 w-32 flex-1" />
+            )
+          }
+          files={
+            changedFiles === null ? <GhostBar className="h-3 w-6" /> : changedFiles.toLocaleString()
+          }
+          diffStat={
+            seed ? (
+              <PullRequestDiffStat
+                additions={seed.additions ?? 0}
+                deletions={seed.deletions ?? 0}
+                className="shrink-0 font-mono text-2xs"
+              />
+            ) : (
+              <GhostBar className="h-3 w-16" />
+            )
+          }
+        />
 
         <PullRequestDetailTabBar tabs={tabs} value={selectedTab} inert>
           {checksPresentation ? (
