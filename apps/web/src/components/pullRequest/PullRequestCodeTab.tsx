@@ -45,6 +45,7 @@ import { canEditPullRequestComment, canResolvePullRequestThread } from "./pullRe
 import { orderDiffFiles } from "./pullRequestFileOrder.logic";
 import {
   buildFileDiffRenderKey,
+  DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES,
   fnv1a32,
   getDiffLineStat,
   getRenderablePatch,
@@ -278,8 +279,6 @@ function PullRequestCodeTab({
   const [toggledFiles, setToggledFiles] = useState<ReadonlySet<string>>(() => new Set());
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
-  const effectiveFoldOverride =
-    foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
   const diffLayout = settings.diffLayout;
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
@@ -620,9 +619,29 @@ function PullRequestCodeTab({
       </div>
     );
 
+  // Each file's fold until the toolbar overrides it: collapsed-by-default still opens files small
+  // enough to read at a glance. Withheld files have no hunks, so they size by their stat.
+  const fileFoldOverrides = new Map(
+    annotatedFiles.map(({ fileKey, path, fileDiff }): [string, DiffFoldOverride] => {
+      if (foldOverride !== null) return [fileKey, foldOverride];
+      if (!settings.diffFilesCollapsed) return [fileKey, "expanded"];
+      const stat = sourceFileStats.get(fileKey) ?? getDiffLineStat([fileDiff]);
+      const changedLines =
+        stat.additions + stat.deletions ||
+        (omittedFileStats.get(path)?.additions ?? 0) + (omittedFileStats.get(path)?.deletions ?? 0);
+      return [
+        fileKey,
+        changedLines >= DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES ? "folded" : "expanded",
+      ];
+    }),
+  );
   const items: CodeViewDiffItem<ReviewAnnotationGroup>[] = annotatedFiles.map(
     ({ fileKey, path, fileDiff, annotations, annotationsVersion }) => {
-      const collapsed = isFileDiffCollapsed(fileKey, effectiveFoldOverride, toggledFiles);
+      const collapsed = isFileDiffCollapsed(
+        fileKey,
+        fileFoldOverrides.get(fileKey) ?? null,
+        toggledFiles,
+      );
       const viewedMark = filesViewedEnabled
         ? `e${isFileViewed(path) ? "v" : ""}${isFileViewedStale(path) ? "s" : ""}`
         : "";
@@ -665,7 +684,7 @@ function PullRequestCodeTab({
   const setFileViewed = (fileKey: string, path: string, viewed: boolean) => {
     setViewed(path, viewed);
     setToggledFiles((current) =>
-      toggleFileDiffFoldForViewed(fileKey, viewed, effectiveFoldOverride, current),
+      toggleFileDiffFoldForViewed(fileKey, viewed, fileFoldOverrides.get(fileKey) ?? null, current),
     );
   };
   const fileViewedToggle = {
@@ -1441,7 +1460,12 @@ function PullRequestCodeTab({
               // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
               onRevealSearchMatch={(item) =>
                 setToggledFiles((current) =>
-                  toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
+                  toggleFileDiffFoldForViewed(
+                    item.id,
+                    false,
+                    fileFoldOverrides.get(item.id) ?? null,
+                    current,
+                  ),
                 )
               }
               unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
