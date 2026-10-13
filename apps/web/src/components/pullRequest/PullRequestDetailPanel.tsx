@@ -55,7 +55,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   useEffect,
   useEffectEvent,
-  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -120,12 +119,9 @@ import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/to
 import { MiddleTruncate } from "../ui/middle-truncate";
 import {
   PullRequestChecksStatusLine,
-  PullRequestDetailHeaderBody,
   PullRequestDetailTabBar,
-  PullRequestDetailTitleRow,
 } from "./PullRequestDetailLayout";
 import { PullRequestDetailGhost, PullRequestTimelineGhost } from "./PullRequestGhosts";
-import { PullRequestCopyableCode } from "./PullRequestCopyableCode";
 import { PullRequestActivityUnavailableState } from "./PullRequestActivityUnavailableState";
 import { DiffPanelLoadingState } from "../DiffPanelShell";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
@@ -675,44 +671,6 @@ export function PullRequestDetailPanel({
   } else if (!tabMountState.tabs.has(tab)) {
     setTabMountState({ key: tabScopeKey, tabs: new Set(tabMountState.tabs).add(tab) });
   }
-  // Each tab restores the condensed state its own scrolling left behind.
-  const [condensedByTab, setCondensedByTab] = useState<Partial<Record<DetailTab, boolean>>>({});
-  const condensed = condensedByTab[tab] ?? false;
-  const scrollerByTab = useRef<Partial<Record<DetailTab, HTMLDivElement | null>>>({});
-  // Fresh ref callbacks would detach and reattach every scroller on each render.
-  const [scrollerRefs] = useState(() => ({
-    summary: (node: HTMLDivElement | null) => {
-      scrollerByTab.current.summary = node;
-    },
-    timeline: (node: HTMLDivElement | null) => {
-      scrollerByTab.current.timeline = node;
-    },
-    code: (node: HTMLDivElement | null) => {
-      scrollerByTab.current.code = node;
-    },
-  }));
-  const foldRef = useRef<HTMLDivElement | null>(null);
-  const condensedRowRef = useRef<HTMLDivElement | null>(null);
-  const compensationRef = useRef<{
-    tab: DetailTab;
-    scroller: HTMLDivElement;
-    delta: number;
-  } | null>(null);
-  useLayoutEffect(() => {
-    const compensation = compensationRef.current;
-    if (compensation === null) return;
-    compensationRef.current = null;
-    if (
-      !condensed ||
-      compensation.tab !== tab ||
-      scrollerByTab.current[tab] !== compensation.scroller
-    )
-      return;
-    compensation.scroller.scrollTop = Math.max(
-      0,
-      compensation.scroller.scrollTop + compensation.delta,
-    );
-  }, [condensed, tab]);
   const lastSelectedMergeMethod = useUiStateStore((state) => state.pullRequestMergeMethod);
   const setLastSelectedMergeMethod = useUiStateStore((state) => state.setPullRequestMergeMethod);
   const resolveProjectDefaultMergeMethod = usePullRequestDefaultMergeMethodResolver(
@@ -1636,6 +1594,78 @@ export function PullRequestDetailPanel({
     );
   }
 
+  // Every tab carries the checks, so their state never hides behind a tab switch.
+  const checksStatus = detail ? (
+    showsApproveWorkflows ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className="ml-auto inline-flex shrink-0">
+              <Button
+                size="xs"
+                variant="warning-outline"
+                disabled={actionPending}
+                {...inlineConfirm.props(
+                  "approve-workflows",
+                  () => void perform("approve-workflows"),
+                )}
+                aria-label={
+                  pendingAction === "approve-workflows"
+                    ? "Approving..."
+                    : inlineConfirm.isArmed("approve-workflows")
+                      ? "Confirm approve?"
+                      : "Approve workflows to run"
+                }
+              >
+                <PlayIcon aria-hidden className="size-3.5" />
+                <span className="inline-grid">
+                  <span aria-hidden className="invisible col-start-1 row-start-1">
+                    Approve workflows to run
+                  </span>
+                  <span aria-hidden className="invisible col-start-1 row-start-1">
+                    Confirm approve?
+                  </span>
+                  <span className="col-start-1 row-start-1">
+                    {pendingAction === "approve-workflows"
+                      ? "Approving..."
+                      : inlineConfirm.isArmed("approve-workflows")
+                        ? "Confirm approve?"
+                        : "Approve workflows to run"}
+                  </span>
+                </span>
+              </Button>
+            </span>
+          }
+        />
+        <TooltipPopup side="top">
+          {pendingAction === "approve-workflows"
+            ? "Approving..."
+            : inlineConfirm.isArmed("approve-workflows")
+              ? "Confirm approve?"
+              : "Approve workflows to run"}
+        </TooltipPopup>
+      </Tooltip>
+    ) : (
+      <PullRequestChecksStatusLine
+        className="text-muted-foreground"
+        aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
+        icon={
+          checksState !== null ? (
+            <PullRequestChecksPopover
+              checks={detail.checks}
+              stale={checksStale}
+              checksState={checksState}
+              threadRef={threadRef}
+            />
+          ) : (
+            <CircleDotIcon aria-hidden className="size-3.5" />
+          )
+        }
+        label={checksSummary}
+      />
+    )
+  ) : null;
+
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
       {threadPickerOpen && detail ? (
@@ -1657,16 +1687,7 @@ export function PullRequestDetailPanel({
         )}
       >
         <div className="pl-4 grid h-7 min-w-0 items-center overflow-hidden">
-          <div
-            aria-hidden={condensed}
-            inert={condensed}
-            className={cn(
-              "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs",
-              condensed
-                ? "pointer-events-none -translate-y-1 opacity-0 duration-100"
-                : "translate-y-0 opacity-100 delay-50 duration-150",
-            )}
-          >
+          <div className="group col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground sm:text-xs">
             {detail && statePresentation ? (
               <>
                 {onBack ? (
@@ -1687,28 +1708,6 @@ export function PullRequestDetailPanel({
                     <TooltipPopup side="top">Back to pull requests</TooltipPopup>
                   </Tooltip>
                 ) : null}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      repositoryUrl ? (
-                        <button
-                          type="button"
-                          onClick={() => void readLocalApi()?.shell.openExternal(repositoryUrl)}
-                          className="min-w-0 cursor-pointer truncate text-left font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                        >
-                          {detail.repository}
-                        </button>
-                      ) : (
-                        <span className="min-w-0 truncate font-medium text-muted-foreground">
-                          {detail.repository}
-                        </span>
-                      )
-                    }
-                  />
-                  <TooltipPopup side="top">
-                    {repositoryUrl ? `Open ${detail.repository} repository` : detail.repository}
-                  </TooltipPopup>
-                </Tooltip>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1733,75 +1732,48 @@ export function PullRequestDetailPanel({
                   />
                   <TooltipPopup side="top">{openOnHostText}</TooltipPopup>
                 </Tooltip>
-              </>
-            ) : null}
-          </div>
-          <div
-            aria-hidden={!condensed}
-            inert={!condensed}
-            className={cn(
-              "col-start-1 row-start-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground transition-[opacity,transform] ease-out motion-reduce:transform-none motion-reduce:transition-none sm:text-xs",
-              condensed
-                ? "translate-y-0 opacity-100 delay-50 duration-150"
-                : "pointer-events-none translate-y-1 opacity-0 duration-100",
-            )}
-          >
-            {detail && statePresentation ? (
-              <>
-                {onBack ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon-micro"
-                          variant="ghost-muted"
-                          tabIndex={condensed ? 0 : -1}
-                          onClick={onBack}
-                          className="-ml-1.5"
-                          aria-label="Back to this thread's pull requests"
-                        >
-                          <ArrowLeftIcon aria-hidden className="size-3.5" />
-                        </Button>
+                {titleDraft === null ? (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className="min-w-0 truncate font-medium text-foreground">
+                            {detail.title}
+                          </span>
+                        }
+                      />
+                      <TooltipPopup side="top">{detail.title}</TooltipPopup>
+                    </Tooltip>
+                    {canEditPullRequestChangeRequest(detail) ? (
+                      <PullRequestEditButton
+                        aria-label="Edit title"
+                        onClick={() => setTitleScope({ pullRequestKey, text: detail.title })}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  // A title is one line of text, so it edits in place: Enter saves, Escape cancels.
+                  <Input
+                    autoFocus
+                    size="sm"
+                    className="min-w-0 flex-1"
+                    disabled={titleSaving}
+                    value={titleDraft}
+                    aria-label="Pull request title"
+                    onChange={(event) =>
+                      setTitleScope({ pullRequestKey, text: event.target.value })
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (canWriteSourceControl) void saveTitle(titleDraft);
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        setTitleScope(null);
                       }
-                    />
-                    <TooltipPopup side="top">Back to pull requests</TooltipPopup>
-                  </Tooltip>
-                ) : null}
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        tabIndex={condensed ? 0 : -1}
-                        onClick={() => void readLocalApi()?.shell.openExternal(detail.url)}
-                        onAuxClick={(event) => {
-                          if (event.button === 1)
-                            void readLocalApi()?.shell.openExternal(detail.url);
-                        }}
-                        onContextMenu={(event) => openNumberContextMenu(event, detail)}
-                        className={cn(
-                          "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 hover:underline",
-                          statePresentation.toneClassName,
-                        )}
-                        aria-label={`Open pull request #${detail.number} on host`}
-                      >
-                        #{detail.number}
-                        <ExternalLinkIcon aria-hidden className="size-2.5" />
-                      </button>
-                    }
+                    }}
                   />
-                  <TooltipPopup side="top">{openOnHostText}</TooltipPopup>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="min-w-0 truncate font-medium text-foreground">
-                        {detail.title}
-                      </span>
-                    }
-                  />
-                  <TooltipPopup side="top">{detail.title}</TooltipPopup>
-                </Tooltip>
+                )}
               </>
             ) : null}
           </div>
@@ -2312,291 +2284,37 @@ export function PullRequestDetailPanel({
           ) : null}
         </div>
 
-        <div
-          className={cn(
-            "col-span-2 grid",
-            condensed
-              ? "grid-rows-[1fr]"
-              : "grid-rows-[0fr] transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-          )}
-        >
-          <div
-            ref={condensedRowRef}
-            className={cn(
-              "min-h-0 overflow-hidden transition-[opacity,transform] duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
-              condensed
-                ? "translate-y-0 opacity-100 delay-50"
-                : "translate-y-1 opacity-0 duration-100",
-            )}
-            inert={!condensed}
-          >
-            {detail ? (
-              <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
-                <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                  <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
-                    <PullRequestActorLabel
-                      actor={detail.author}
-                      profileUrl={authorProfileUrl}
-                      variant="avatar"
-                      className="shrink-0"
-                    />
-                    <span className="shrink-0">
-                      <RelativeTime timestamp={detail.updatedAt} />
-                    </span>
-                  </span>
-                  <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
-                  <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
-                    {freshness ? (
-                      <PullRequestBaseFreshnessWarning
-                        baseBranch={detail.baseBranch}
-                        freshness={freshness}
-                        pending={actionPending}
-                        onUpdate={(method) => void perform("update-branch", undefined, method)}
-                        iconClassName="size-3"
-                        className="max-w-[40%]"
-                      >
-                        {isStackedPullRequest ? (
-                          <PullRequestGlyph.stack
-                            aria-label="Stacked pull request"
-                            className="size-3 shrink-0"
-                          />
-                        ) : null}
-                        <code className="flex min-w-0">
-                          <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                        </code>
-                      </PullRequestBaseFreshnessWarning>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
-                              {isStackedPullRequest ? (
-                                <PullRequestGlyph.stack
-                                  aria-label="Stacked pull request"
-                                  className="size-3 shrink-0"
-                                />
-                              ) : null}
-                              <code className="flex min-w-0">
-                                <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                              </code>
-                            </span>
-                          }
-                        />
-                        <TooltipPopup side="top">
-                          {isStackedPullRequest
-                            ? `Stacked on ${detail.baseBranch}`
-                            : detail.baseBranch}
-                        </TooltipPopup>
-                      </Tooltip>
-                    )}
-                    <ArrowLeftIcon
-                      aria-label="receives changes from"
-                      className="size-3 shrink-0 opacity-60"
-                    />
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <code className="flex min-w-0 flex-1">
-                            <MiddleTruncate value={detail.headBranch} showTitle={false} />
-                          </code>
-                        }
+        {detail ? (
+          <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
+                <PullRequestActorLabel
+                  actor={detail.author}
+                  profileUrl={authorProfileUrl}
+                  variant="avatar"
+                  className="shrink-0"
+                />
+                <span className="shrink-0">
+                  <RelativeTime timestamp={detail.updatedAt} />
+                </span>
+              </span>
+              <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
+                {freshness ? (
+                  <PullRequestBaseFreshnessWarning
+                    baseBranch={detail.baseBranch}
+                    freshness={freshness}
+                    pending={actionPending}
+                    onUpdate={(method) => void perform("update-branch", undefined, method)}
+                    iconClassName="size-3"
+                    className="max-w-[40%]"
+                  >
+                    {isStackedPullRequest ? (
+                      <PullRequestGlyph.stack
+                        aria-label="Stacked pull request"
+                        className="size-3 shrink-0"
                       />
-                      <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
-                    </Tooltip>
-                  </span>
-                  <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2 text-2xs">
-                    <span
-                      className="inline-flex items-center gap-1 tabular-nums"
-                      aria-label={`${detail.changedFiles.toLocaleString()} changed ${
-                        detail.changedFiles === 1 ? "file" : "files"
-                      }`}
-                    >
-                      <FileDiffIcon aria-hidden className="size-3" />
-                      {detail.changedFiles.toLocaleString()}
-                    </span>
-                    <PullRequestDiffStat
-                      additions={detail.additions}
-                      deletions={detail.deletions}
-                      className="shrink-0 font-mono text-2xs"
-                    />
-                  </span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div
-          className={cn(
-            "col-span-2 grid",
-            condensed
-              ? "grid-rows-[0fr]"
-              : "grid-rows-[1fr] transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-          )}
-        >
-          <div
-            ref={foldRef}
-            className={cn(
-              "min-h-0 overflow-hidden transition-[opacity,transform] duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
-              condensed
-                ? "-translate-y-1 opacity-0 duration-100"
-                : "translate-y-0 opacity-100 delay-50",
-            )}
-            inert={condensed}
-          >
-            {detail ? (
-              <PullRequestDetailHeaderBody
-                title={
-                  titleDraft === null ? (
-                    <PullRequestDetailTitleRow className="group gap-1">
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <h1 className="min-w-0 flex-1 truncate text-base font-semibold leading-snug">
-                              {detail.title}
-                            </h1>
-                          }
-                        />
-                        <TooltipPopup side="top">{detail.title}</TooltipPopup>
-                      </Tooltip>
-                      {canEditPullRequestChangeRequest(detail) ? (
-                        <PullRequestEditButton
-                          aria-label="Edit title"
-                          onClick={() => setTitleScope({ pullRequestKey, text: detail.title })}
-                        />
-                      ) : null}
-                    </PullRequestDetailTitleRow>
-                  ) : (
-                    <div className="space-y-2">
-                      <Input
-                        autoFocus
-                        size="sm"
-                        disabled={titleSaving}
-                        value={titleDraft}
-                        aria-label="Pull request title"
-                        onChange={(event) =>
-                          setTitleScope({ pullRequestKey, text: event.target.value })
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            void saveTitle(titleDraft);
-                          } else if (event.key === "Escape") {
-                            event.preventDefault();
-                            setTitleScope(null);
-                          }
-                        }}
-                      />
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          disabled={titleSaving}
-                          onClick={() => setTitleScope(null)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={
-                            !canWriteSourceControl || titleSaving || titleDraft.trim().length === 0
-                          }
-                          onClick={() => void saveTitle(titleDraft)}
-                        >
-                          {titleSaving ? "Saving..." : "Save"}
-                        </Button>
-                      </div>
-                    </div>
-                  )
-                }
-                author={
-                  <PullRequestActorLabel actor={detail.author} profileUrl={authorProfileUrl} />
-                }
-                updated={
-                  <span>
-                    updated <RelativeTime timestamp={detail.updatedAt} />
-                  </span>
-                }
-                checkout={
-                  checkoutCommand ? (
-                    <PullRequestCopyableCode
-                      key={checkoutCommand}
-                      value={checkoutCommand}
-                      target="pull request checkout command"
-                      copyLabel="Copy checkout command"
-                      copiedLabel="Checkout command copied"
-                      className="ml-auto font-mono"
-                      tooltipSide="bottom"
-                      onError={reportCheckoutCommandError}
-                    />
-                  ) : null
-                }
-                base={
-                  freshness ? (
-                    <PullRequestBaseFreshnessWarning
-                      baseBranch={detail.baseBranch}
-                      freshness={freshness}
-                      pending={actionPending}
-                      onUpdate={(method) => void perform("update-branch", undefined, method)}
-                      className="max-w-[40%]"
-                    >
-                      {isStackedPullRequest ? (
-                        <PullRequestGlyph.stack
-                          aria-label="Stacked pull request"
-                          className="size-3 shrink-0"
-                        />
-                      ) : null}
-                      <code className="flex min-w-0">
-                        <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                      </code>
-                    </PullRequestBaseFreshnessWarning>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
-                            {isStackedPullRequest ? (
-                              <PullRequestGlyph.stack
-                                aria-label="Stacked pull request"
-                                className="size-3 shrink-0"
-                              />
-                            ) : null}
-                            <code className="flex min-w-0">
-                              <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                            </code>
-                          </span>
-                        }
-                      />
-                      <TooltipPopup side="top">
-                        {isStackedPullRequest
-                          ? `Stacked on ${detail.baseBranch}`
-                          : detail.baseBranch}
-                      </TooltipPopup>
-                    </Tooltip>
-                  )
-                }
-                head={
-                  <PullRequestCopyableCode
-                    key={detail.headBranch}
-                    value={detail.headBranch}
-                    target="branch name"
-                    copyLabel="Copy pull request branch"
-                    copiedLabel="Branch name copied"
-                  />
-                }
-                files={`${detail.changedFiles.toLocaleString()} ${detail.changedFiles === 1 ? "file" : "files"}`}
-                diffStat={
-                  <PullRequestDiffStat
-                    additions={detail.additions}
-                    deletions={detail.deletions}
-                    className="shrink-0 font-mono text-xs"
-                  />
-                }
-              />
-            ) : null}
-          </div>
-        </div>
+                    ) : null}
 
         {detail ? (
           <PullRequestDetailTabBar
@@ -2607,77 +2325,11 @@ export function PullRequestDetailPanel({
               if (item === "code") void loadCodeTab();
             }}
           >
-            {tab === "summary" ? (
-              showsApproveWorkflows ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className="ml-auto inline-flex shrink-0">
-                        <Button
-                          size="xs"
-                          variant="warning-outline"
-                          disabled={actionPending}
-                          {...inlineConfirm.props(
-                            "approve-workflows",
-                            () => void perform("approve-workflows"),
-                          )}
-                          aria-label={
-                            pendingAction === "approve-workflows"
-                              ? "Approving..."
-                              : inlineConfirm.isArmed("approve-workflows")
-                                ? "Confirm approve?"
-                                : "Approve workflows to run"
-                          }
-                        >
-                          <PlayIcon aria-hidden className="size-3.5" />
-                          <span className="inline-grid">
-                            <span aria-hidden className="invisible col-start-1 row-start-1">
-                              Approve workflows to run
-                            </span>
-                            <span aria-hidden className="invisible col-start-1 row-start-1">
-                              Confirm approve?
-                            </span>
-                            <span className="col-start-1 row-start-1">
-                              {pendingAction === "approve-workflows"
-                                ? "Approving..."
-                                : inlineConfirm.isArmed("approve-workflows")
-                                  ? "Confirm approve?"
-                                  : "Approve workflows to run"}
-                            </span>
-                          </span>
-                        </Button>
-                      </span>
-                    }
-                  />
-                  <TooltipPopup side="top">
-                    {pendingAction === "approve-workflows"
-                      ? "Approving..."
-                      : inlineConfirm.isArmed("approve-workflows")
-                        ? "Confirm approve?"
-                        : "Approve workflows to run"}
-                  </TooltipPopup>
-                </Tooltip>
-              ) : (
-                <PullRequestChecksStatusLine
-                  className="text-muted-foreground"
-                  aria-label={checksSummary ? `Checks: ${checksSummary}` : "Checks"}
-                  icon={
-                    checksState !== null ? (
-                      <PullRequestChecksPopover
-                        checks={detail.checks}
-                        stale={checksStale}
-                        checksState={checksState}
-                        threadRef={threadRef}
-                      />
-                    ) : (
-                      <CircleDotIcon aria-hidden className="size-3.5" />
-                    )
-                  }
-                  label={checksSummary}
-                />
-              )
-            ) : tab === "timeline" ? (
+            {tab !== "timeline" ? (
+              checksStatus
+            ) : (
               <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                {checksStatus}
                 <PullRequestMetaLine
                   className={cn(
                     "whitespace-nowrap text-2xs transition-opacity",
@@ -2749,31 +2401,12 @@ export function PullRequestDetailPanel({
                   {timelineOrder === "newest" ? "Newest first" : "Oldest first"}
                 </Button>
               </div>
-            ) : null}
+            )}
           </PullRequestDetailTabBar>
         ) : null}
       </div>
 
-      <div
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-        onScrollCapture={(event) => {
-          const scroller = scrollerByTab.current[tab];
-          if (event.target !== scroller || scroller === null || scroller === undefined) return;
-          const top = scroller.scrollTop;
-          // Decided here, not in a state updater, which React may run during render.
-          const previous = condensedByTab[tab] ?? false;
-          const foldHeight = foldRef.current?.scrollHeight ?? 0;
-          let next = previous;
-          if (previous) {
-            if (top < 4 && foldHeight > 0) next = false;
-          } else if (foldHeight > 0 && top > foldHeight + 32) {
-            const chromeDelta = foldHeight - (condensedRowRef.current?.scrollHeight ?? 0);
-            compensationRef.current = { tab, scroller, delta: -chromeDelta };
-            next = true;
-          }
-          if (next !== previous) setCondensedByTab({ ...condensedByTab, [tab]: next });
-        }}
-      >
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {detailQuery.error && !detail ? (
           <PullRequestsUnavailableState
             {...(isPullRequestNotFound(detailQuery.failure)
@@ -2792,7 +2425,6 @@ export function PullRequestDetailPanel({
             {mountedTabs.has("summary") ? (
               <div className={cn("absolute inset-0", tab !== "summary" && "invisible")}>
                 <PullRequestSummaryTab
-                  scrollerRef={scrollerRefs.summary}
                   environmentId={environmentId}
                   threadRef={threadRef}
                   reference={reference}
@@ -2847,7 +2479,6 @@ export function PullRequestDetailPanel({
                   />
                 ) : (
                   <PullRequestTimelineTab
-                    scrollerRef={scrollerRefs.timeline}
                     detail={detail}
                     environmentId={environmentId}
                     threadRef={threadRef}
@@ -2863,7 +2494,6 @@ export function PullRequestDetailPanel({
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                 <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
                   <PullRequestCodeTab
-                    scrollerRef={scrollerRefs.code}
                     onAddToAgentSelection={addSelectionToAgent}
                     environmentId={environmentId}
                     reference={reference}

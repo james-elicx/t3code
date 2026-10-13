@@ -83,7 +83,6 @@ const render = (value = detail) =>
   act(async () =>
     root.render(
       <PullRequestSummaryTab
-        scrollerRef={() => {}}
         environmentId={EnvironmentId.make("environment")}
         threadRef={null}
         reference={value}

@@ -241,7 +241,6 @@ export interface PullRequestAgentSelectionInput {
 }
 
 function PullRequestCodeTab({
-  scrollerRef,
   environmentId,
   reference,
   detail,
@@ -255,7 +254,6 @@ function PullRequestCodeTab({
   refreshToken = 0,
   revealRequest = null,
 }: {
-  scrollerRef: (node: HTMLDivElement | null) => void;
   environmentId: EnvironmentId;
   reference: PullRequestRef;
   detail: PullRequestDetailView;
@@ -1314,9 +1312,7 @@ function PullRequestCodeTab({
   const withToolbar = (body: ReactNode) => (
     <div className="flex h-full min-h-0 flex-col">
       {toolbar}
-      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
-        {body}
-      </div>
+      <div className="min-h-0 flex-1 overflow-auto">{body}</div>
     </div>
   );
 
@@ -1447,7 +1443,6 @@ function PullRequestCodeTab({
           <FileViewedToggleContext value={fileViewedToggle}>
             <StyledDiffCodeView<ReviewAnnotationGroup>
               className="@container h-full overflow-auto [scrollbar-gutter:stable]"
-              containerRef={scrollerRef}
               viewerRef={setViewer}
               items={items}
               selectedLines={selectedLines}

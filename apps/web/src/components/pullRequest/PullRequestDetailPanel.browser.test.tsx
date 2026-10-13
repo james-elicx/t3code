@@ -87,14 +87,13 @@ vi.mock(import("~/state/usePullRequestStack"), async (original) => ({
   })) as never,
 }));
 // The real tabs load diffs, markdown and checks from the environment; these stand-ins
-// expose the actions they hand back to the panel and a tall scroller.
+// expose the actions they hand back to the panel.
 vi.mock(import("./PullRequestSummaryTab"), async (original) => ({
   ...(await original()),
   PullRequestSummaryTab: (({
     onFixFinding,
-    scrollerRef,
   }: ComponentProps<typeof import("./PullRequestSummaryTab").PullRequestSummaryTab>) => (
-    <div ref={scrollerRef} data-testid="summary-scroller" className="h-full overflow-y-auto">
+    <div>
       <button
         type="button"
         onClick={() =>
@@ -106,10 +105,6 @@ vi.mock(import("./PullRequestSummaryTab"), async (original) => ({
       >
         Fix check
       </button>
-      <div data-testid="nested-scroller" className="h-40 overflow-y-auto">
-        <div className="h-[2000px]" />
-      </div>
-      <div className="h-[3000px]" />
     </div>
   )) as never,
 }));
@@ -117,9 +112,8 @@ vi.mock(import("./PullRequestCodeTab"), async (original) => ({
   ...(await original()),
   default: (({
     onAddToAgentSelection,
-    scrollerRef,
   }: ComponentProps<typeof import("./PullRequestCodeTab").default>) => (
-    <div ref={scrollerRef} data-testid="code-scroller" className="h-full overflow-y-auto">
+    <div>
       <button
         type="button"
         onClick={() =>
@@ -141,7 +135,6 @@ vi.mock(import("./PullRequestCodeTab"), async (original) => ({
       >
         Add to agent
       </button>
-      <div className="h-[3000px]" />
     </div>
   )) as never,
 }));
@@ -344,45 +337,4 @@ describe.each([
       expect(newThread).toHaveBeenCalled();
     }
   });
-});
-
-it("folds the title only for the active tab's own scroller", async () => {
-  await render();
-  const title = page.getByRole("heading", { level: 1, name: "Test pull request" });
-  await expect.element(title).toBeVisible();
-  const titleFold = () => title.element().closest("[inert]") !== null;
-  const scrollTo = async (testId: string, top: number) => {
-    const scroller = page.getByTestId(testId).element() as HTMLElement;
-    await act(async () => {
-      scroller.scrollTop = top;
-      scroller.dispatchEvent(new Event("scroll"));
-    });
-    return scroller;
-  };
-
-  await scrollTo("nested-scroller", 600);
-  expect(titleFold()).toBe(false);
-
-  const summary = await scrollTo("summary-scroller", 600);
-  await vi.waitFor(() => expect(titleFold()).toBe(true));
-  // Folding the header keeps the content under the reader's eye.
-  expect(summary.scrollTop).toBeLessThan(600);
-
-  await scrollTo("summary-scroller", 0);
-  await vi.waitFor(() => expect(titleFold()).toBe(false));
-  await scrollTo("summary-scroller", 600);
-  await vi.waitFor(() => expect(titleFold()).toBe(true));
-
-  await tab("Code").click();
-  await expect.element(page.getByTestId("code-scroller")).toBeInTheDocument();
-  await vi.waitFor(() => expect(titleFold()).toBe(false));
-  await scrollTo("code-scroller", 600);
-  await vi.waitFor(() => expect(titleFold()).toBe(true));
-
-  await tab("Summary").click();
-  await vi.waitFor(() => expect(titleFold()).toBe(true));
-  await scrollTo("summary-scroller", 0);
-  await vi.waitFor(() => expect(titleFold()).toBe(false));
-  await tab("Code").click();
-  await vi.waitFor(() => expect(titleFold()).toBe(true));
 });
