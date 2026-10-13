@@ -212,7 +212,6 @@ export interface PullRequestsSearch extends PullRequestListPreferences {
  * to the edge. The glyph is the one the involvement filter uses for the same idea.
  */
 const GROUP_ICONS: Record<string, LucideIcon> = {
-  authored: PenLineIcon,
   reviewRequested: EyeIcon,
   others: UsersIcon,
 };
@@ -822,25 +821,25 @@ function PullRequestsRouteView() {
     }));
   }, [environmentQueries, filtersOpen, scopedProjectId, search.host, search.involvement]);
   const facetQuery = usePullRequestList(facetTargets);
-  // The priority groups' own reads. The feed below is paginated by recency, so an older authored
-  // or review-requested row can be missing from its first page; partitioned from these
-  // server-filtered reads instead, the priority view is complete up front and a continuation can
+  // The priority group's own read. The feed below is paginated by recency, so an older
+  // review-requested row can be missing from its first page; partitioned from this
+  // server-filtered read instead, the priority view is complete up front and a continuation can
   // only ever append below what is already on screen. A search re-ranks the whole list by match,
-  // so no partitions are read for one. These are the same atoms the Authored and Reviewing tabs
-  // ask for, so switching to either is answered from cache.
+  // so no partition is read for one. Your own pull requests are not lifted out of the feed: All
+  // is the timeline, and the Authored tab is where they stand alone.
   const partitionsWanted = search.involvement === "all" && typedQuery.length === 0;
-  // Built together so the two reads share one memo, and in the same field order the feed's own
-  // input uses: the atoms are keyed by their input, so the Authored tab then reads this answer.
+  // In the same field order the feed's own input uses: the atoms are keyed by their input, so
+  // the Reviewing tab then reads this answer from cache.
   const partitionTargets = useMemo(() => {
     // The main list goes first. Besides putting the visible rows on screen sooner, it proves
     // which repositories the host search indexes, so an empty partition does not trigger the
-    // expensive per-repository fallback. With no rows at all both partitions are already empty.
+    // expensive per-repository fallback. With no rows at all the partition is already empty.
     if (
       !partitionsWanted ||
       baselineQuery.data === null ||
       baselineQuery.data.entries.length === 0
     ) {
-      return { authored: NO_LIST_TARGETS, reviewing: NO_LIST_TARGETS };
+      return { reviewing: NO_LIST_TARGETS };
     }
     const targetsFor = (involvement: PullRequestInvolvement) =>
       environmentQueries.map(({ environmentId, projectIds }) => ({
@@ -855,7 +854,7 @@ function PullRequestsRouteView() {
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,
       }));
-    return { authored: targetsFor("authored"), reviewing: targetsFor("reviewing") };
+    return { reviewing: targetsFor("reviewing") };
   }, [
     menuFiltered,
     menuFilters,
@@ -866,7 +865,6 @@ function PullRequestsRouteView() {
     search.host,
     search.state,
   ]);
-  const authoredQuery = usePullRequestList(partitionTargets.authored);
   const reviewingQuery = usePullRequestList(partitionTargets.reviewing);
   // The header's refresh punches through the server's cache before re-reading; the error and
   // empty states retry plainly, because a failure is never cached.
@@ -1016,23 +1014,22 @@ function PullRequestsRouteView() {
     if (!listQuery.data || listQuery.isPending) return;
     const data = listQuery.data;
     setLoaded((current) => {
-      // The partitions arrive on their own clock, so this records whichever have landed by
-      // now and runs again when the rest do. Until then the ones already held for this scope
-      // stay — hydrated or previously answered — rather than being dropped for a feed that
-      // merely settled first.
+      // The partition arrives on its own clock, so this runs again when it lands. Until then
+      // the one already held for this scope stays — hydrated or previously answered — rather
+      // than being dropped for a feed that merely settled first.
       const partitions =
         partitionsWanted && baselineEmpty
-          ? { authored: [], reviewing: [] }
-          : partitionsWanted && authoredQuery.data !== null && reviewingQuery.data !== null
-            ? { authored: authoredQuery.data.entries, reviewing: reviewingQuery.data.entries }
+          ? { reviewing: [] }
+          : partitionsWanted && reviewingQuery.data !== null
+            ? { reviewing: reviewingQuery.data.entries }
             : current !== null &&
                 current.environmentKey === environmentKey &&
                 current.scope === scopeKey
               ? current.partitions
               : undefined;
       // A search's answer is the search's, not the workspace's, so only unsearched lists
-      // persist. Written here where the held partitions are in reach, so a feed settling
-      // ahead of them cannot overwrite a stored snapshot that already had both groups.
+      // persist. Written here where the held partition is in reach, so a feed settling
+      // ahead of it cannot overwrite a stored snapshot that already had the group.
       //
       // What is written is what the reader is actually looking at, not this round's own
       // answer: a continuation only asks the environments still paging, so its answer alone is
@@ -1072,7 +1069,6 @@ function PullRequestsRouteView() {
     listQuery.isPending,
     baselineEmpty,
     partitionsWanted,
-    authoredQuery.data,
     reviewingQuery.data,
     ordered,
     filterKey,
@@ -1209,14 +1205,7 @@ function PullRequestsRouteView() {
   // merge above bring every row up to date in place.
   const refreshList = (includeRelated = false, actedEnvironmentId?: EnvironmentId) => {
     const related = (
-      includeRelated
-        ? [
-            ...baselineTargets,
-            ...facetTargets,
-            ...partitionTargets.authored,
-            ...partitionTargets.reviewing,
-          ]
-        : []
+      includeRelated ? [...baselineTargets, ...facetTargets, ...partitionTargets.reviewing] : []
     ).filter(
       ({ environmentId }) =>
         actedEnvironmentId === undefined || environmentId === actedEnvironmentId,
@@ -1367,38 +1356,32 @@ function PullRequestsRouteView() {
     if (baselineEmpty) {
       return groupPullRequestsByInvolvement(entries, viewers);
     }
-    // Until both partitions have answered, the snapshot's stand in — they are yesterday's
-    // groups, but whole ones, where grouping the feed's first page locally loses every
-    // authored row older than it. Once the live reads land they take over; with neither,
-    // the local grouping is still better than nothing.
+    // Until the partition has answered, the snapshot's stands in — it is yesterday's group,
+    // but a whole one, where grouping the feed's first page locally loses every review request
+    // older than it. Once the live read lands it takes over; with neither, the local grouping
+    // is still better than nothing.
     const held =
       loaded !== null && loaded.environmentKey === environmentKey && loaded.scope === scopeKey
         ? loaded.partitions
         : undefined;
-    // The priority reads answer the same question the feed does, so they take the same local
-    // narrowing: a host that cannot filter for itself would otherwise put rows into Authored
-    // that the filters above just took out of the feed.
+    // The priority read answers the same question the feed does, so it takes the same local
+    // narrowing: a host that cannot filter for itself would otherwise put rows into Review
+    // requested that the filters above just took out of the feed.
     const narrow = (rows: ReadonlyArray<EnvironmentPullRequestEntry> | undefined) =>
       rows === undefined || !hasLocalFilters
         ? rows
         : rows.filter((entry) =>
             matchesPullRequestFilters(entry, localFilters, pullRequestEntryViewer(entry, viewers)),
           );
-    const authored = narrow(
-      partitionsWanted ? (authoredQuery.data?.entries ?? held?.authored) : undefined,
-    );
     const reviewing = narrow(
       partitionsWanted ? (reviewingQuery.data?.entries ?? held?.reviewing) : undefined,
     );
-    if (authored === undefined || reviewing === undefined) {
-      return groupPullRequestsByInvolvement(entries, viewers);
-    }
-    return partitionPullRequestsWithPriority(entries, authored, reviewing);
+    if (reviewing === undefined) return groupPullRequestsByInvolvement(entries, viewers);
+    return partitionPullRequestsWithPriority(entries, reviewing);
   }, [
     hasLocalFilters,
     baselineEmpty,
     localFilters,
-    authoredQuery.data?.entries,
     entries,
     environmentKey,
     loaded,
@@ -1545,8 +1528,8 @@ function PullRequestsRouteView() {
     setStatsByRow((previous) => mergePullRequestDiffStats(previous, stats));
   }, [statsQuery.stats]);
   const displayGroups = useMemo(() => {
-    // The reader's pending answers go on here, after grouping: the authored and reviewing
-    // groups are read separately from the feed, and a row closed a moment ago has to leave
+    // The reader's pending answers go on here, after grouping: the review-requested group is
+    // read separately from the feed, and a row closed a moment ago has to leave
     // whichever group it was in.
     const enriched = groups.map((group) => {
       const answered = applyPullRequestOverrides(

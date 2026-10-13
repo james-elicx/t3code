@@ -40,7 +40,7 @@ export interface EnvironmentPullRequestError extends PullRequestListProjectError
   readonly environmentId: EnvironmentId;
 }
 
-export type PullRequestGroupKey = "reviewRequested" | "authored" | "others";
+export type PullRequestGroupKey = "reviewRequested" | "others";
 
 export interface PullRequestGroup<Entry extends PullRequestListEntry = PullRequestListEntry> {
   readonly key: PullRequestGroupKey;
@@ -74,7 +74,6 @@ const pullRequestViewerKey = (entry: ScopedEntry): string =>
 
 const GROUP_LABELS: Record<PullRequestGroupKey, string> = {
   reviewRequested: "Review requested",
-  authored: "Authored",
   others: "Others",
 };
 
@@ -400,7 +399,8 @@ export function matchesPullRequestFilters(
 
 /**
  * Only relationships the list data actually carries: no "previously reviewed" bucket is
- * inferred, because the listing has no review history.
+ * inferred, because the listing has no review history. Your own pull requests stay in the
+ * feed's order; the Authored filter is where they are shown on their own.
  */
 export function groupPullRequestsByInvolvement<Entry extends ScopedEntry>(
   entries: ReadonlyArray<Entry>,
@@ -408,19 +408,16 @@ export function groupPullRequestsByInvolvement<Entry extends ScopedEntry>(
 ): ReadonlyArray<PullRequestGroup<Entry>> {
   const buckets: Record<PullRequestGroupKey, Entry[]> = {
     reviewRequested: [],
-    authored: [],
     others: [],
   };
   for (const entry of entries) {
-    if (isAuthoredByViewer(entry, viewers)) {
-      buckets.authored.push(entry);
-    } else if (entry.viewerReviewRequested) {
+    if (entry.viewerReviewRequested) {
       buckets.reviewRequested.push(entry);
     } else {
       buckets.others.push(entry);
     }
   }
-  return (["authored", "reviewRequested", "others"] as const)
+  return (["reviewRequested", "others"] as const)
     .filter((key) => buckets[key].length > 0)
     .map((key) => ({ key, label: GROUP_LABELS[key], entries: buckets[key] }));
 }
@@ -589,33 +586,25 @@ export function retainVisiblePullRequestStatsBatches(
 }
 
 /**
- * The priority groups built from the hosts' own answers rather than re-partitioned from the
- * paginated feed. The feed is sliced by recency, so an older authored or review-requested row
- * can be missing from its first page and arrive with a later one; grouping the loaded pages
- * would then move it above rows already read. Here the partitions come whole from their own
- * server-filtered reads, the feed fills "Others" in its own order, and a continuation can only
- * append — a row it carries that a partition already holds is dropped rather than moved.
+ * The priority group built from the host's own answer rather than re-partitioned from the
+ * paginated feed. The feed is sliced by recency, so an older review-requested row can be
+ * missing from its first page and arrive with a later one; grouping the loaded pages
+ * would then move it above rows already read. Here the partition comes whole from its own
+ * server-filtered read, the feed fills "Others" in its own order, and a continuation can only
+ * append — a row it carries that the partition already holds is dropped rather than moved.
  */
 export function partitionPullRequestsWithPriority<Entry extends PullRequestListEntry>(
   entries: ReadonlyArray<Entry>,
-  authored: ReadonlyArray<Entry>,
   reviewRequested: ReadonlyArray<Entry>,
 ): ReadonlyArray<PullRequestGroup<Entry>> {
-  const authoredByKey = new Map(authored.map((entry) => [pullRequestEntryKey(entry), entry]));
-  // A row can be both authored and review-requested; authored wins, as the local grouping has it.
   const reviewByKey = new Map(
-    reviewRequested.flatMap((entry) => {
-      const key = pullRequestEntryKey(entry);
-      return authoredByKey.has(key) ? [] : [[key, entry] as const];
-    }),
+    reviewRequested.map((entry) => [pullRequestEntryKey(entry), entry] as const),
   );
   const others: Entry[] = [];
   for (const entry of entries) {
     const key = pullRequestEntryKey(entry);
     // The feed's copy of a partitioned row is at least as fresh — it replaces in place.
-    if (authoredByKey.has(key)) {
-      authoredByKey.set(key, entry);
-    } else if (reviewByKey.has(key)) {
+    if (reviewByKey.has(key)) {
       reviewByKey.set(key, entry);
     } else {
       others.push(entry);
@@ -624,7 +613,6 @@ export function partitionPullRequestsWithPriority<Entry extends PullRequestListE
   const byRecency = (left: Entry, right: Entry) => right.updatedAt.localeCompare(left.updatedAt);
   return (
     [
-      { key: "authored", entries: [...authoredByKey.values()].toSorted(byRecency) },
       { key: "reviewRequested", entries: [...reviewByKey.values()].toSorted(byRecency) },
       { key: "others", entries: others },
     ] as const
@@ -765,12 +753,11 @@ const snapshotStorageKey = (environmentSetKey: string) =>
   `t3.pullRequests.list:${environmentSetKey}`;
 
 /**
- * The priority groups' own server-filtered answers, carried with the feed. An authored pull
- * request older than the feed's first page lives only in these, so a snapshot without them
- * cold-starts into an Authored group missing exactly the rows that made it worth having.
+ * The priority group's own server-filtered answer, carried with the feed. A review request
+ * older than the feed's first page lives only in this, so a snapshot without it cold-starts
+ * into a Review requested group missing exactly the rows that made it worth having.
  */
 export interface PullRequestPartitionsSnapshot {
-  readonly authored: ReadonlyArray<EnvironmentPullRequestEntry>;
   readonly reviewing: ReadonlyArray<EnvironmentPullRequestEntry>;
 }
 
@@ -810,7 +797,6 @@ const decodeSnapshot = Schema.decodeUnknownOption(
     // Optional so a snapshot written before the partitions existed still hydrates the feed.
     partitions: Schema.optional(
       Schema.Struct({
-        authored: Schema.Array(EnvironmentPullRequestEntrySchema),
         reviewing: Schema.Array(EnvironmentPullRequestEntrySchema),
       }),
     ),
@@ -862,7 +848,6 @@ export function writePullRequestListSnapshot(
           ? {}
           : {
               partitions: {
-                authored: snapshot.partitions.authored.slice(0, SNAPSHOT_MAX_ENTRIES),
                 reviewing: snapshot.partitions.reviewing.slice(0, SNAPSHOT_MAX_ENTRIES),
               },
             }),
@@ -1073,7 +1058,7 @@ export function rankPullRequestsBlockedOnReviewer<Entry extends PullRequestListE
   return rankByTierThenRecency(entries, (entry) => (entry.state === "open" ? 0 : 1));
 }
 
-/** Keeps authored work first while applying the selected ordering inside every involvement group. */
+/** Keeps review requests first while applying the selected ordering inside every involvement group. */
 export function sortPullRequestGroups<Entry extends PullRequestListEntry>(
   groups: ReadonlyArray<PullRequestGroup<Entry>>,
   sort: PullRequestListSort,
@@ -1091,8 +1076,7 @@ export function sortPullRequestGroups<Entry extends PullRequestListEntry>(
   }
   if (sort === "blocked") {
     if (searchText.trim().length > 0) return groups;
-    const role = (key: PullRequestGroupKey) =>
-      key === "others" ? involvement : key === "authored" ? "authored" : "reviewing";
+    const role = (key: PullRequestGroupKey) => (key === "others" ? involvement : "reviewing");
     return groups.map((group) => {
       const groupRole = role(group.key);
       if (groupRole === "all") return group;
@@ -1234,8 +1218,8 @@ const PULL_REQUEST_OVERRIDE_TRUST_MS = 60_000;
  * The overrides an answer has confirmed, dropped; the rest kept. A read that started before
  * the action can land after it and still say the old thing, so an override is not cleared
  * because an answer arrived but because the answer agrees: the row is there in the state the
- * override said. A row that is absent says nothing — the authored and reviewing groups are read
- * apart from the feed, and a page is only a page — so absence never confirms. A row present in
+ * override said. A row that is absent says nothing — the review-requested group is read apart
+ * from the feed, and a page is only a page — so absence never confirms. A row present in
  * another state is taken for a stale read for a minute, and for the host's news after that,
  * which is how a pull request reopened elsewhere comes back.
  */

@@ -370,17 +370,14 @@ describe("pull request involvement filtering", () => {
 });
 
 describe("pull request grouping", () => {
-  it("buckets authored above review-requested and drops empty groups", () => {
+  it("lifts review requests above the rest and drops empty groups", () => {
     const groups = groupPullRequestsByInvolvement(
-      [
-        entry({ number: 1, author: { login: "bilal", name: null, avatarUrl: null } }),
-        entry({ number: 2, viewerReviewRequested: true }),
-      ],
+      [entry({ number: 1 }), entry({ number: 2, viewerReviewRequested: true })],
       VIEWERS,
     );
     expect(groups.map((group) => [group.key, group.entries.length])).toEqual([
-      ["authored", 1],
       ["reviewRequested", 1],
+      ["others", 1],
     ]);
   });
 
@@ -389,18 +386,17 @@ describe("pull request grouping", () => {
     expect(groups.map((group) => group.key)).toEqual(["others"]);
   });
 
-  it("counts an authored pull request once, even with a review request on it", () => {
+  it("leaves your own pull requests in the feed's order", () => {
     const groups = groupPullRequestsByInvolvement(
       [
-        entry({
-          number: 1,
-          author: { login: "bilal", name: null, avatarUrl: null },
-          viewerReviewRequested: true,
-        }),
+        entry({ number: 1 }),
+        entry({ number: 2, author: { login: "bilal", name: null, avatarUrl: null } }),
+        entry({ number: 3 }),
       ],
       VIEWERS,
     );
-    expect(groups.map((group) => group.key)).toEqual(["authored"]);
+    expect(groups.map((group) => group.key)).toEqual(["others"]);
+    expect(groups[0]!.entries.map((row) => row.number)).toEqual([1, 2, 3]);
   });
 });
 
@@ -829,9 +825,9 @@ describe("default merge-readiness ranking", () => {
     );
   });
 
-  it("keeps authored work first and ranks each group by readiness", () => {
-    const authoredWaiting = entry({ number: 1, checksState: "pending" });
-    const authoredReady = entry({
+  it("keeps review requests first and ranks each group by readiness", () => {
+    const requestedWaiting = entry({ number: 1, checksState: "pending" });
+    const requestedReady = entry({
       number: 2,
       checksState: "passing",
       reviewDecision: "approved",
@@ -843,14 +839,18 @@ describe("default merge-readiness ranking", () => {
     });
     const sorted = sortPullRequestGroups(
       [
-        { key: "authored", label: "Authored", entries: [authoredWaiting, authoredReady] },
+        {
+          key: "reviewRequested",
+          label: "Review requested",
+          entries: [requestedWaiting, requestedReady],
+        },
         { key: "others", label: "Others", entries: [otherReady] },
       ],
       "ready",
       "",
     );
 
-    expect(sorted.map((group) => group.key)).toEqual(["authored", "others"]);
+    expect(sorted.map((group) => group.key)).toEqual(["reviewRequested", "others"]);
     expect(sorted.flatMap((group) => group.entries).map((row) => row.number)).toEqual([2, 1, 3]);
   });
 
@@ -860,31 +860,38 @@ describe("default merge-readiness ranking", () => {
     ["oldest", [1, 2]],
     ["largest", [1, 2]],
     ["smallest", [2, 1]],
-  ] as const)("keeps authored first while applying the %s sort inside groups", (sort, order) => {
-    const olderLarger = entry({
-      number: 1,
-      additions: 20,
-      createdAt: "2026-07-01T00:00:00Z",
-      updatedAt: "2026-08-01T00:00:00Z",
-    });
-    const newerSmaller = entry({
-      number: 2,
-      additions: 2,
-      createdAt: "2026-08-01T00:00:00Z",
-      updatedAt: "2026-07-01T00:00:00Z",
-    });
-    const sorted = sortPullRequestGroups(
-      [
-        { key: "authored", label: "Authored", entries: [olderLarger, newerSmaller] },
-        { key: "others", label: "Others", entries: [entry({ number: 3 })] },
-      ],
-      sort,
-      "",
-    );
+  ] as const)(
+    "keeps review requests first while applying the %s sort inside groups",
+    (sort, order) => {
+      const olderLarger = entry({
+        number: 1,
+        additions: 20,
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+      });
+      const newerSmaller = entry({
+        number: 2,
+        additions: 2,
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-07-01T00:00:00Z",
+      });
+      const sorted = sortPullRequestGroups(
+        [
+          {
+            key: "reviewRequested",
+            label: "Review requested",
+            entries: [olderLarger, newerSmaller],
+          },
+          { key: "others", label: "Others", entries: [entry({ number: 3 })] },
+        ],
+        sort,
+        "",
+      );
 
-    expect(sorted.map((group) => group.key)).toEqual(["authored", "others"]);
-    expect(sorted[0]!.entries.map((row) => row.number)).toEqual(order);
-  });
+      expect(sorted.map((group) => group.key)).toEqual(["reviewRequested", "others"]);
+      expect(sorted[0]!.entries.map((row) => row.number)).toEqual(order);
+    },
+  );
 });
 
 describe("blocked-on-me ranking", () => {
@@ -946,10 +953,6 @@ describe("blocked-on-me ranking", () => {
   });
 
   it("ranks blocked groups according to their involvement", () => {
-    const authored = [
-      entry({ number: 1, isDraft: true }),
-      entry({ number: 2, checksState: "failing" }),
-    ];
     const reviewing = [
       entry({ number: 3, updatedAt: "2026-08-02T00:00:00Z" }),
       entry({ number: 4, updatedAt: "2026-08-01T00:00:00Z" }),
@@ -959,7 +962,6 @@ describe("blocked-on-me ranking", () => {
       entry({ number: 6, isDraft: true }),
     ];
     const groups = [
-      { key: "authored", label: "Authored", entries: authored },
       { key: "reviewRequested", label: "Review requested", entries: reviewing },
       { key: "others", label: "Others", entries: others },
     ] as const;
@@ -969,17 +971,16 @@ describe("blocked-on-me ranking", () => {
         group.entries.map((row) => row.number),
       ),
     ).toEqual([
-      [2, 1],
       [3, 4],
       [5, 6],
     ]);
     expect(
-      sortPullRequestGroups([groups[2]], "blocked", "", undefined, "authored")[0]!.entries.map(
+      sortPullRequestGroups([groups[1]], "blocked", "", undefined, "authored")[0]!.entries.map(
         (row) => row.number,
       ),
     ).toEqual([6, 5]);
     expect(
-      sortPullRequestGroups([groups[2]], "blocked", "", undefined, "reviewing")[0]!.entries.map(
+      sortPullRequestGroups([groups[1]], "blocked", "", undefined, "reviewing")[0]!.entries.map(
         (row) => row.number,
       ),
     ).toEqual([5, 6]);
@@ -1042,50 +1043,47 @@ describe("merging line counts across keyed stats queries", () => {
 });
 
 describe("partitioning with the hosts' own priority reads", () => {
-  const authoredRow = (number: number, updatedAt: string) =>
-    entry({ number, updatedAt, author: { login: "Bilal", name: null, avatarUrl: null } });
+  const requestedRow = (number: number, updatedAt: string) =>
+    entry({ number, updatedAt, viewerReviewRequested: true });
 
-  it("keeps Others in feed order when a continuation lands an authored row already partitioned", () => {
+  it("keeps Others in feed order when a continuation lands a row already partitioned", () => {
     const older = entry({ number: 1, updatedAt: "2026-07-05T00:00:00Z" });
     const newer = entry({ number: 2, updatedAt: "2026-07-06T00:00:00Z" });
-    const mine = authoredRow(3, "2026-07-04T00:00:00Z");
-    // The authored partition already holds the row the continuation carries.
-    const groups = partitionPullRequestsWithPriority([newer, older, mine], [mine], []);
-    expect(groups.map((group) => group.key)).toEqual(["authored", "others"]);
-    expect(groups[1]!.entries.map((item) => item.number)).toEqual([2, 1]);
+    const requested = requestedRow(3, "2026-07-04T00:00:00Z");
+    // The review-requested partition already holds the row the continuation carries.
+    const groups = partitionPullRequestsWithPriority([newer, older, requested], [requested]);
+    expect(groups.map((group) => group.key)).toEqual(["reviewRequested", "others"]);
     expect(groups[0]!.entries.map((item) => item.number)).toEqual([3]);
+    expect(groups[1]!.entries.map((item) => item.number)).toEqual([2, 1]);
   });
 
-  it("appends an authored row the partition page missed to Others rather than moving it up", () => {
+  it("appends a review request the partition page missed to Others rather than moving it up", () => {
     const shown = entry({ number: 1, updatedAt: "2026-07-06T00:00:00Z" });
-    const olderMine = authoredRow(9, "2026-01-01T00:00:00Z");
-    const groups = partitionPullRequestsWithPriority([shown, olderMine], [], []);
+    const olderRequested = requestedRow(9, "2026-01-01T00:00:00Z");
+    const groups = partitionPullRequestsWithPriority([shown, olderRequested], []);
     expect(groups).toHaveLength(1);
     expect(groups[0]!.entries.map((item) => item.number)).toEqual([1, 9]);
   });
 
-  it("gives authored precedence over review-requested and orders partitions by recency", () => {
-    const both = authoredRow(1, "2026-07-01T00:00:00Z");
-    const requested = entry({
-      number: 2,
-      viewerReviewRequested: true,
-      updatedAt: "2026-07-02T00:00:00Z",
+  it("orders the partition by recency and leaves your own rows in the feed", () => {
+    const mine = entry({
+      number: 1,
+      updatedAt: "2026-07-03T00:00:00Z",
+      author: { login: "Bilal", name: null, avatarUrl: null },
     });
-    const requestedOlder = entry({
-      number: 3,
-      viewerReviewRequested: true,
-      updatedAt: "2026-06-02T00:00:00Z",
-    });
-    const groups = partitionPullRequestsWithPriority([], [both], [both, requestedOlder, requested]);
-    expect(groups.map((group) => group.key)).toEqual(["authored", "reviewRequested"]);
-    expect(groups[0]!.entries.map((item) => item.number)).toEqual([1]);
-    expect(groups[1]!.entries.map((item) => item.number)).toEqual([2, 3]);
+    const other = entry({ number: 4, updatedAt: "2026-07-04T00:00:00Z" });
+    const requested = requestedRow(2, "2026-07-02T00:00:00Z");
+    const requestedOlder = requestedRow(3, "2026-06-02T00:00:00Z");
+    const groups = partitionPullRequestsWithPriority([other, mine], [requestedOlder, requested]);
+    expect(groups.map((group) => group.key)).toEqual(["reviewRequested", "others"]);
+    expect(groups[0]!.entries.map((item) => item.number)).toEqual([2, 3]);
+    expect(groups[1]!.entries.map((item) => item.number)).toEqual([4, 1]);
   });
 
   it("lets the feed's copy of a partitioned row replace the partition's", () => {
-    const stale = authoredRow(1, "2026-07-01T00:00:00Z");
+    const stale = requestedRow(1, "2026-07-01T00:00:00Z");
     const fresh = { ...stale, title: "Retitled" };
-    const groups = partitionPullRequestsWithPriority([fresh], [stale], []);
+    const groups = partitionPullRequestsWithPriority([fresh], [stale]);
     expect(groups[0]!.entries[0]!.title).toBe("Retitled");
   });
 });
@@ -1385,17 +1383,13 @@ describe('who "I" am, per server', () => {
 
   it("does not let one server's account decide who authored another server's rows", () => {
     // Both servers reach github.com, signed in as different people. Folded into one host-keyed
-    // record, whichever answered last spoke for both — and every row of the reader's own work
-    // was filed under Others.
+    // record, whichever answered last spoke for both — and the reader's own work vanished from
+    // the Authored filter.
     const merged = mergePullRequestLists([
       [ENV_1, answer({ "github.com": "Bilal" }, [entry({ number: 1, author: byBilal })])],
       [ENV_2, answer({ "github.com": "Octocat" }, [entry({ number: 2, author: byBilal })])],
     ])!;
 
-    const groups = groupPullRequestsByInvolvement(merged.entries, merged.viewers);
-    expect(
-      groups.find((group) => group.key === "authored")?.entries.map((row) => row.number),
-    ).toEqual([1]);
     expect(
       filterPullRequestsByInvolvement(merged.entries, merged.viewers, "authored").map(
         (row) => row.number,
@@ -1587,25 +1581,25 @@ describe("colon-namespaced labels typed as a search", () => {
 });
 
 describe("the priority groups against a paginated feed", () => {
-  const authoredRow = (number: number, updatedAt: string) =>
-    entry({ number, updatedAt, author: { login: "Bilal", name: null, avatarUrl: null } });
+  const requestedRow = (number: number, updatedAt: string) =>
+    entry({ number, updatedAt, viewerReviewRequested: true });
 
-  it("shows every authored row the host reported, not only the ones the feed page holds", () => {
+  it("shows every review request the host reported, not only the ones the feed page holds", () => {
     // The feed is one page ordered by recency, so on a busy repository it can hold exactly one of
-    // somebody's own pull requests while the rest sit further down the host's list. The Authored
-    // group comes from its own server-filtered read for that reason: grouping the page instead
-    // leaves the older ones under Others, or off the page altogether.
-    const newest = authoredRow(6039, "2026-08-11T08:00:00Z");
+    // the reader's review requests while the rest sit further down the host's list. The group
+    // comes from its own server-filtered read for that reason: grouping the page instead leaves
+    // the older ones off the page altogether.
+    const newest = requestedRow(6039, "2026-08-11T08:00:00Z");
     const older = [
-      authoredRow(5499, "2026-08-10T17:00:00Z"),
-      authoredRow(5544, "2026-08-10T16:00:00Z"),
+      requestedRow(5499, "2026-08-10T17:00:00Z"),
+      requestedRow(5544, "2026-08-10T16:00:00Z"),
     ];
     const feed = [newest, entry({ number: 6123, updatedAt: "2026-08-11T09:00:00Z" })];
 
-    const groups = partitionPullRequestsWithPriority(feed, [newest, ...older], []);
+    const groups = partitionPullRequestsWithPriority(feed, [newest, ...older]);
 
     expect(
-      groups.find((group) => group.key === "authored")?.entries.map((row) => row.number),
+      groups.find((group) => group.key === "reviewRequested")?.entries.map((row) => row.number),
     ).toEqual([6039, 5499, 5544]);
     expect(
       groups.find((group) => group.key === "others")?.entries.map((row) => row.number),
