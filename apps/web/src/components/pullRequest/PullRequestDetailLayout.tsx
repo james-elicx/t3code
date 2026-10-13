@@ -4,61 +4,53 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { PullRequestMetaLine } from "./pullRequestPresentation";
 
-export function PullRequestDetailHeaderBody({
-  title,
+/**
+ * The compact facts row under the header. The loading ghost renders the same row, so the detail
+ * lands without moving anything.
+ */
+export function PullRequestDetailMetaRow({
   author,
   updated,
-  checkout,
   base,
   head,
   files,
+  filesLabel,
   diffStat,
 }: {
-  title: ReactNode;
   author: ReactNode;
   updated: ReactNode;
-  checkout?: ReactNode;
   base: ReactNode;
   head: ReactNode;
   files: ReactNode;
+  filesLabel?: string | undefined;
   diffStat: ReactNode;
 }) {
   return (
-    <div className="col-span-2 mt-1 min-w-0 px-4 pb-4">
-      {title}
-      <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
+    <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden">
           {author}
           {updated}
-        </PullRequestMetaLine>
-        {checkout}
-      </div>
-      <div className="mt-4 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-muted-foreground/70">
+        </span>
+        <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
           {base}
           <ArrowLeftIcon
             aria-label="receives changes from"
-            className="size-3.5 shrink-0 opacity-60"
+            className="size-3 shrink-0 opacity-60"
           />
           {head}
         </span>
-        <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
-          <span className="inline-flex min-w-16 items-center justify-end gap-1.5 tabular-nums">
-            <FileDiffIcon aria-hidden className="size-3.5" />
+        <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2 text-2xs">
+          <span className="inline-flex items-center gap-1 tabular-nums" aria-label={filesLabel}>
+            <FileDiffIcon aria-hidden className="size-3" />
             {files}
           </span>
           {diffStat}
         </span>
       </div>
     </div>
-  );
-}
-
-export function PullRequestDetailTitleRow({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div className={cn("flex min-h-7 min-w-0 items-center sm:min-h-6", className)} {...props} />
   );
 }
 

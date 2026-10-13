@@ -32,7 +32,6 @@ import {
   CopyIcon,
   ChevronDownIcon,
   ExternalLinkIcon,
-  FileDiffIcon,
   FolderGit2Icon,
   GitBranchIcon,
   GitCommitHorizontalIcon,
@@ -117,7 +116,11 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import { MiddleTruncate } from "../ui/middle-truncate";
-import { PullRequestChecksStatusLine, PullRequestDetailTabBar } from "./PullRequestDetailLayout";
+import {
+  PullRequestChecksStatusLine,
+  PullRequestDetailMetaRow,
+  PullRequestDetailTabBar,
+} from "./PullRequestDetailLayout";
 import { PullRequestDetailGhost, PullRequestTimelineGhost } from "./PullRequestGhosts";
 import { PullRequestActivityUnavailableState } from "./PullRequestActivityUnavailableState";
 import { DiffPanelLoadingState } from "../DiffPanelShell";
@@ -139,12 +142,10 @@ import {
   handoffPrompt,
   handoffReviewComments,
   latestPullRequestReviewOutcomes,
-  loadingPullRequestCheckoutCommand,
   isPullRequestNotFound,
   isStackedPullRequestBase,
   pullRequestActionMenuHasGroup,
   pullRequestActionNeedsHostRefresh,
-  pullRequestCheckoutCommand,
   pullRequestFindingKey,
   pullRequestHandoffLabels,
   PULL_REQUEST_MERGE_METHOD_LABELS,
@@ -759,22 +760,6 @@ export function PullRequestDetailPanel({
     detail?.author && repositoryUrl !== null
       ? hostClient.authorProfileUrl(detail.author.login, repositoryUrl)
       : null;
-  const checkoutCommand = handoffSummary
-    ? pullRequestCheckoutCommand(
-        handoffSummary.provider,
-        handoffSummary.number,
-        handoffSummary.headBranch,
-        detail?.headRepositoryNameWithOwner,
-        changeRequestRepositoryUrl(handoffSummary.url),
-      )
-    : loadingPullRequestCheckoutCommand(reference, repositoryIdentity);
-  const onCheckoutCommandError = useCallback((error: Error) => {
-    toastManager.add({
-      type: "error",
-      title: "Could not copy checkout command",
-      description: error.message,
-    });
-  }, []);
   const branchRefsQuery = useEnvironmentQuery(
     detail === null
       ? null
@@ -1700,8 +1685,6 @@ export function PullRequestDetailPanel({
       <PullRequestDetailGhost
         seed={matchingListEntry}
         summary={sharedSummary}
-        checkoutCommand={checkoutCommand}
-        onCheckoutError={onCheckoutCommandError}
         number={reference.number}
         tabs={visibleTabs}
         activeTab={tab}
@@ -2407,96 +2390,86 @@ export function PullRequestDetailPanel({
         </div>
 
         {detail ? (
-          <div className="col-span-2 min-w-0 px-4 pb-2 pt-1">
-            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-              <span className="flex min-w-0 shrink items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
-                <PullRequestActorLabel
-                  actor={detail.author}
-                  profileUrl={authorProfileUrl}
-                  variant="avatar"
-                  className="shrink-0"
-                />
-                <span className="shrink-0">{formatRelativeTimeLabel(detail.updatedAt)}</span>
-              </span>
-              <span aria-hidden className="h-3 w-px shrink-0 bg-border/70" />
-              <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-2xs text-muted-foreground/65">
-                {/* An out-of-date base wears the warning on the branch name itself, so the
-                    name is amber and pointing at either the name or the mark opens the way
-                    out. Up to date, the name keeps its plain tooltip. */}
-                {freshness ? (
-                  <PullRequestBaseFreshnessWarning
-                    baseBranch={detail.baseBranch}
-                    freshness={freshness}
-                    pending={actionPending}
-                    onUpdate={(method) => void perform("update-branch", undefined, method)}
-                    iconClassName="size-3"
-                    className="max-w-[40%]"
-                  >
-                    {isStackedPullRequest ? (
-                      <PullRequestGlyph.stack
-                        aria-label="Stacked pull request"
-                        className="size-3 shrink-0"
-                      />
-                    ) : null}
-                    <code className="flex min-w-0">
-                      <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                    </code>
-                  </PullRequestBaseFreshnessWarning>
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
-                          {isStackedPullRequest ? (
-                            <PullRequestGlyph.stack
-                              aria-label="Stacked pull request"
-                              className="size-3 shrink-0"
-                            />
-                          ) : null}
-                          <code className="flex min-w-0">
-                            <MiddleTruncate value={detail.baseBranch} showTitle={false} />
-                          </code>
-                        </span>
-                      }
+          <PullRequestDetailMetaRow
+            author={
+              <PullRequestActorLabel
+                actor={detail.author}
+                profileUrl={authorProfileUrl}
+                variant="avatar"
+                className="shrink-0"
+              />
+            }
+            updated={<span className="shrink-0">{formatRelativeTimeLabel(detail.updatedAt)}</span>}
+            base={
+              /* An out-of-date base wears the warning on the branch name itself, so the
+                  name is amber and pointing at either the name or the mark opens the way
+                  out. Up to date, the name keeps its plain tooltip. */
+              freshness ? (
+                <PullRequestBaseFreshnessWarning
+                  baseBranch={detail.baseBranch}
+                  freshness={freshness}
+                  pending={actionPending}
+                  onUpdate={(method) => void perform("update-branch", undefined, method)}
+                  iconClassName="size-3"
+                  className="max-w-[40%]"
+                >
+                  {isStackedPullRequest ? (
+                    <PullRequestGlyph.stack
+                      aria-label="Stacked pull request"
+                      className="size-3 shrink-0"
                     />
-                    <TooltipPopup side="top">
-                      {isStackedPullRequest ? `Stacked on ${detail.baseBranch}` : detail.baseBranch}
-                    </TooltipPopup>
-                  </Tooltip>
-                )}
-                <ArrowLeftIcon
-                  aria-label="receives changes from"
-                  className="size-3 shrink-0 opacity-60"
-                />
+                  ) : null}
+                  <code className="flex min-w-0">
+                    <MiddleTruncate value={detail.baseBranch} showTitle={false} />
+                  </code>
+                </PullRequestBaseFreshnessWarning>
+              ) : (
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <code className="flex min-w-0 flex-1">
-                        <MiddleTruncate value={detail.headBranch} showTitle={false} />
-                      </code>
+                      <span className="inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1">
+                        {isStackedPullRequest ? (
+                          <PullRequestGlyph.stack
+                            aria-label="Stacked pull request"
+                            className="size-3 shrink-0"
+                          />
+                        ) : null}
+                        <code className="flex min-w-0">
+                          <MiddleTruncate value={detail.baseBranch} showTitle={false} />
+                        </code>
+                      </span>
                     }
                   />
-                  <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
+                  <TooltipPopup side="top">
+                    {isStackedPullRequest ? `Stacked on ${detail.baseBranch}` : detail.baseBranch}
+                  </TooltipPopup>
                 </Tooltip>
-              </span>
-              <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2 text-2xs">
-                <span
-                  className="inline-flex items-center gap-1 tabular-nums"
-                  aria-label={`${detail.changedFiles.toLocaleString()} changed ${
-                    detail.changedFiles === 1 ? "file" : "files"
-                  }`}
-                >
-                  <FileDiffIcon aria-hidden className="size-3" />
-                  {detail.changedFiles.toLocaleString()}
-                </span>
-                <PullRequestDiffStat
-                  additions={detail.additions}
-                  deletions={detail.deletions}
-                  className="shrink-0 font-mono text-2xs"
+              )
+            }
+            head={
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <code className="flex min-w-0 flex-1">
+                      <MiddleTruncate value={detail.headBranch} showTitle={false} />
+                    </code>
+                  }
                 />
-              </span>
-            </div>
-          </div>
+                <TooltipPopup side="top">{detail.headBranch}</TooltipPopup>
+              </Tooltip>
+            }
+            files={detail.changedFiles.toLocaleString()}
+            filesLabel={`${detail.changedFiles.toLocaleString()} changed ${
+              detail.changedFiles === 1 ? "file" : "files"
+            }`}
+            diffStat={
+              <PullRequestDiffStat
+                additions={detail.additions}
+                deletions={detail.deletions}
+                className="shrink-0 font-mono text-2xs"
+              />
+            }
+          />
         ) : null}
 
         {detail ? (
