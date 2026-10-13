@@ -1,7 +1,7 @@
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree, useFileTreeSelector } from "@pierre/trees/react";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useTheme } from "~/hooks/useTheme";
@@ -35,14 +35,81 @@ const DIFF_TREE_UNSAFE_CSS = `${PIERRE_TREE_UNSAFE_CSS}
   [data-item-flattened-subitem]:last-of-type { flex-shrink: 0.2; min-width: 2em; }
 `;
 
-/** The full path of the row under the pointer, since a narrow tree shortens its names. */
-function treeRowPath(event: { nativeEvent: Event }): string | null {
-  for (const node of event.nativeEvent.composedPath()) {
+const ROW_TOOLTIP_DELAY_MS = 500;
+
+interface HoveredTreeRow {
+  readonly anchor: Element;
+  readonly path: string;
+}
+
+function hoveredTreeRow(event: Event): HoveredTreeRow | null {
+  for (const node of event.composedPath()) {
     if (!(node instanceof HTMLElement)) continue;
     const path = node.getAttribute("data-item-path");
-    if (path !== null) return path.replace(/\/$/, "");
+    if (path !== null) return { anchor: node, path: path.replace(/\/$/, "") };
   }
   return null;
+}
+
+/**
+ * The full path of the tree row under the pointer, since a narrow tree shortens its names. The
+ * rows live in Pierre's shadow root, so this listens on the container and anchors to the row
+ * element itself; hovering never re-renders the tree.
+ */
+function FileTreeRowTooltip({ containerRef }: { containerRef: RefObject<HTMLElement | null> }) {
+  const [row, setRow] = useState<HoveredTreeRow | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+    let timer: number | null = null;
+    let shown = false;
+    const clearTimer = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    };
+    const show = (next: HoveredTreeRow) => {
+      shown = true;
+      setRow((current) =>
+        current?.anchor === next.anchor && current.path === next.path ? current : next,
+      );
+      setOpen(true);
+    };
+    const hide = () => {
+      clearTimer();
+      shown = false;
+      setOpen(false);
+    };
+    const handlePointerOver = (event: PointerEvent) => {
+      const next = hoveredTreeRow(event);
+      if (next === null) return hide();
+      clearTimer();
+      // Once a path is showing, the next row answers at once, like a tooltip group.
+      if (shown) return show(next);
+      timer = window.setTimeout(() => show(next), ROW_TOOLTIP_DELAY_MS);
+    };
+    container.addEventListener("pointerover", handlePointerOver);
+    container.addEventListener("pointerleave", hide);
+    container.addEventListener("pointerdown", hide);
+    // Virtualized rows are reused as the tree scrolls, so the anchor would point at another file.
+    container.addEventListener("wheel", hide, { passive: true });
+    return () => {
+      clearTimer();
+      container.removeEventListener("pointerover", handlePointerOver);
+      container.removeEventListener("pointerleave", hide);
+      container.removeEventListener("pointerdown", hide);
+      container.removeEventListener("wheel", hide);
+    };
+  }, [containerRef]);
+
+  return (
+    <Tooltip open={open && row !== null}>
+      <TooltipPopup anchor={row?.anchor} side="left" variant="code">
+        {row?.path}
+      </TooltipPopup>
+    </Tooltip>
+  );
 }
 
 interface DiffFileTreeProps {
@@ -86,6 +153,7 @@ export function DiffFileTree({
   const syncingSelectionRef = useRef(false);
   const handledRevealRef = useRef<{ path: string; revealRequestId: number } | null>(null);
   const mountedPathsRef = useRef<ReadonlyArray<string> | null>(null);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
 
   // The tree model keeps the first selection handler it was given.
   const handleSelectionChange = useStableCallback((selectedPaths: ReadonlyArray<string>) => {
@@ -172,7 +240,10 @@ export function DiffFileTree({
   ]);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>
+    <div
+      ref={treeContainerRef}
+      className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}
+    >
       <div
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
@@ -211,13 +282,6 @@ export function DiffFileTree({
       <FileTree
         model={model}
         aria-label={ariaLabel}
-        // A native title on the host, set as the pointer moves between rows: no React state, so
-        // hovering never re-renders the tree.
-        onPointerOver={(event) => {
-          const path = treeRowPath(event);
-          if (path === null) event.currentTarget.removeAttribute("title");
-          else if (event.currentTarget.title !== path) event.currentTarget.title = path;
-        }}
         onClickCapture={(event) => {
           if (
             event.defaultPrevented ||
@@ -244,6 +308,7 @@ export function DiffFileTree({
         className="min-h-0 flex-1 overflow-hidden"
         style={pierreTreeStyle(resolvedTheme)}
       />
+      <FileTreeRowTooltip containerRef={treeContainerRef} />
       {footer}
     </div>
   );
