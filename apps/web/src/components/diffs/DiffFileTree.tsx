@@ -57,56 +57,78 @@ function hoveredTreeRow(event: Event): HoveredTreeRow | null {
  * element itself; hovering never re-renders the tree.
  */
 function FileTreeRowTooltip({ containerRef }: { containerRef: RefObject<HTMLElement | null> }) {
-  const [row, setRow] = useState<HoveredTreeRow | null>(null);
+  const [row, setRow] = useState<(HoveredTreeRow & { readonly showId: number }) | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
     let timer: number | null = null;
+    let hoveredPath: string | null = null;
     let shown = false;
+    let showId = 0;
     const clearTimer = () => {
       if (timer !== null) window.clearTimeout(timer);
       timer = null;
     };
     const show = (next: HoveredTreeRow) => {
       shown = true;
-      setRow((current) =>
-        current?.anchor === next.anchor && current.path === next.path ? current : next,
-      );
+      showId += 1;
+      setRow({ ...next, showId });
       setOpen(true);
     };
     const hide = () => {
       clearTimer();
+      hoveredPath = null;
       shown = false;
       setOpen(false);
     };
-    const handlePointerOver = (event: PointerEvent) => {
+    const handlePointerMove = (event: PointerEvent) => {
       const next = hoveredTreeRow(event);
+      // Moving within a row keeps its pending delay or open tooltip.
+      if (next?.path === hoveredPath) return;
       if (next === null) return hide();
+      hoveredPath = next.path;
       clearTimer();
       // Once a path is showing, the next row answers at once, like a tooltip group.
       if (shown) return show(next);
       timer = window.setTimeout(() => show(next), ROW_TOOLTIP_DELAY_MS);
     };
-    container.addEventListener("pointerover", handlePointerOver);
+    container.addEventListener("pointermove", handlePointerMove);
     container.addEventListener("pointerleave", hide);
     container.addEventListener("pointerdown", hide);
     // Virtualized rows are reused as the tree scrolls, so the anchor would point at another file.
     container.addEventListener("wheel", hide, { passive: true });
     return () => {
       clearTimer();
-      container.removeEventListener("pointerover", handlePointerOver);
+      container.removeEventListener("pointermove", handlePointerMove);
       container.removeEventListener("pointerleave", hide);
       container.removeEventListener("pointerdown", hide);
       container.removeEventListener("wheel", hide);
     };
   }, [containerRef]);
 
+  if (row === null) return null;
+  // Keyed per show: an open tooltip does not follow a new anchor, so each one positions fresh.
+  return <TreeRowPathTooltip key={row.showId} anchor={row.anchor} open={open} path={row.path} />;
+}
+
+function TreeRowPathTooltip({
+  anchor,
+  open,
+  path,
+}: {
+  anchor: Element;
+  open: boolean;
+  path: string;
+}) {
+  const [mounted, setMounted] = useState(false);
+  // oxlint-disable-next-line react/set-state-in-effect -- Opens one render after mounting: Base UI only skips its slide-from-origin position transition when a mounted tooltip goes from closed to open.
+  useEffect(() => setMounted(true), []);
   return (
-    <Tooltip open={open && row !== null}>
-      <TooltipPopup anchor={row?.anchor} side="left" variant="code">
-        {row?.path}
+    <Tooltip open={open && mounted}>
+      <TooltipPopup anchor={anchor} side="left" variant="code">
+        {path}
       </TooltipPopup>
     </Tooltip>
   );
