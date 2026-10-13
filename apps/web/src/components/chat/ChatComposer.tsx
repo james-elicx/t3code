@@ -1449,6 +1449,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 
 export interface ChatComposerHandle {
   focusAtEnd: () => void;
+  /** Focus for typing without expanding a resting composer; typing still does. */
+  focusAtEndResting: () => void;
   focusAt: (cursor: number) => void;
   /** Expand the desktop composer at the timeline end without taking focus. */
   restoreAfterTimelineReachedEnd: () => void;
@@ -2508,6 +2510,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandInFlightRef = useRef(false);
   const composerScrollCollapseTimeoutRef = useRef<number | null>(null);
   const composerScrollCollapseEligibleRef = useRef(false);
+  // Set only for the synchronous span of focusAtEndResting, so the focus and
+  // caret placement it causes do not count as a request to expand.
+  const keepRestingOnFocusRef = useRef(false);
   const windowRefocusInFlightRef = useRef(false);
   const composerScrollGestureRef = useRef(createComposerScrollGestureState());
   const stashPulseKeyRef = useRef(0);
@@ -3575,7 +3580,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setComposerCursor(cursor);
     resetComposerTrigger(trigger);
     setIsDragOverComposer(false);
-    setIsComposerScrollCollapsed(false);
+    setIsComposerScrollCollapsed(true);
   }, [
     draftId,
     activeThreadId,
@@ -3703,6 +3708,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Callbacks: prompt change
   // ------------------------------------------------------------------
   const expandComposerForEditorChange = useCallback(() => {
+    if (keepRestingOnFocusRef.current) return;
     // Editor changes win over the momentum tail of the active scroll gesture.
     suppressActiveComposerScrollGesture(
       composerScrollGestureRef.current,
@@ -5240,13 +5246,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerSubmissionError !== null ||
     providerInputSubmissionError !== null ||
     hasImageAttachmentAttention;
+  // Desktop threads rest whenever the prompt fits on one line, so only a
+  // multiline draft or expanded chrome expands the composer. Focus still
+  // expands it when the context strip is too narrow to host the controls.
+  const restsUntilMultiline =
+    routeKind === "server" &&
+    activeThreadId !== null &&
+    !isMobileViewport &&
+    settings.composerCollapseOnScroll &&
+    !showInlineTasksBadge &&
+    (restingControlsVisible || !isComposerFocused);
   const isComposerResting = shouldUseRestingComposerLayout({
     isExistingThread: routeKind === "server" && activeThreadId !== null,
     isMobileViewport,
-    isScrollCollapsed: isComposerScrollCollapsed,
+    isScrollCollapsed: isComposerScrollCollapsed || restsUntilMultiline,
     hasExpandedChrome: composerHasExpandedChrome,
     hasMultilinePrompt,
-    timelineOverflows,
+    timelineOverflows: timelineOverflows || restsUntilMultiline,
   });
   const expandedComposerImages = isComposerResting
     ? standaloneComposerImages.filter((image) => pendingSnapShotIdSet.has(image.id))
@@ -6451,6 +6467,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       focusAtEnd: () => {
         composerEditorRef.current?.focusAtEnd();
       },
+      focusAtEndResting: () => {
+        keepRestingOnFocusRef.current = true;
+        try {
+          composerEditorRef.current?.focusAtEnd();
+        } finally {
+          keepRestingOnFocusRef.current = false;
+        }
+      },
       focusAt: (cursor: number) => {
         composerEditorRef.current?.focusAt(cursor);
       },
@@ -6762,7 +6786,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // Focus returning from another window or tab lands on the element
         // that already held it, which is not a request to expand a
         // scroll-collapsed composer.
-        if (!windowRefocusInFlightRef.current) {
+        if (!windowRefocusInFlightRef.current && !keepRestingOnFocusRef.current) {
           setIsComposerScrollCollapsed(false);
         }
         if (composerBlurFrameRef.current !== null) {

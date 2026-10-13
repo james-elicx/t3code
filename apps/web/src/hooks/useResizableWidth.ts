@@ -21,6 +21,7 @@ export const RESIZABLE_WIDTH_PROPERTY = "--resizable-width";
 export interface UseResizableWidthOptions {
   /** localStorage key the persisted width is stored under. */
   readonly storageKey: string;
+  /** Used until the user resizes; a changing default is followed live. */
   readonly defaultWidth: number;
   readonly minWidth: number;
   readonly maxWidth: number;
@@ -64,15 +65,15 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     [defaultWidth, maxWidth, minWidth],
   );
 
-  // No cross-tab subscription: panel width is per-window state.
-  const readWidth = () => {
-    if (typeof window === "undefined") return defaultWidth;
+  // No cross-tab subscription: panel width is per-window state. Null means
+  // never resized, so the width keeps following `defaultWidth`.
+  const readWidth = (): number | null => {
+    if (typeof window === "undefined") return null;
     try {
-      const stored = getLocalStorageItem(storageKey, WidthSchema);
-      return clamp(stored ?? defaultWidth);
+      return getLocalStorageItem(storageKey, WidthSchema);
     } catch (error) {
       console.error("Could not read persisted panel width.", error);
-      return defaultWidth;
+      return null;
     }
   };
   const [widthState, setWidthState] = useState(() => ({ storageKey, width: readWidth() }));
@@ -81,7 +82,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     setWidthState({ storageKey, width: readWidth() });
   }
 
-  const clampedWidth = clamp(widthState.width);
+  const clampedWidth = clamp(widthState.width ?? defaultWidth);
   const latestOptions = useRef({ clamp, storageKey, width: clampedWidth });
   useLayoutEffect(() => {
     latestOptions.current = { clamp, storageKey, width: clampedWidth };

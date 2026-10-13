@@ -52,14 +52,16 @@ function Panel({
   edge = "left",
   maxWidth = 800,
   storageKey = "test-panel-width",
+  defaultWidth = 400,
 }: {
   edge?: "left" | "right";
   maxWidth?: number;
   storageKey?: string;
+  defaultWidth?: number;
 }) {
   const resize = useResizableWidth({
     storageKey,
-    defaultWidth: 400,
+    defaultWidth,
     minWidth: 200,
     maxWidth,
     edge,
@@ -251,5 +253,17 @@ describe("panel width storage changes", () => {
     expect(setItem).not.toHaveBeenCalled();
     await act(() => renderer.update(<Panel />));
     expect(result.width).toBe(400);
+  });
+
+  it("follows a changing default until the panel is resized", async () => {
+    await act(() => renderer.update(<Panel defaultWidth={500} />));
+    expect(result.width).toBe(500);
+    await act(() => {
+      result.handlers.onPointerDown(pointer());
+      result.handlers.onPointerUp(pointer(50));
+    });
+    expect(result.width).toBe(550);
+    await act(() => renderer.update(<Panel defaultWidth={300} />));
+    expect(result.width).toBe(550);
   });
 });
