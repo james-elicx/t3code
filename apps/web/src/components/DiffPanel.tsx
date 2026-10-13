@@ -37,6 +37,7 @@ import {
   buildFileDiffContentVersion,
   buildFileDiffIdentityKey,
   getDiffCollapseIconClassName,
+  DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES,
   getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
@@ -511,13 +512,20 @@ export default function DiffPanel({
     () => renderableFiles.map(getCachedFileEntry),
     [renderableFiles],
   );
-  const defaultCollapsedDiffFileKeys = useMemo(
-    () =>
-      settings.diffFilesCollapsed
-        ? new Set(renderableFileEntries.map((file) => file.fileKey))
-        : EMPTY_COLLAPSED_DIFF_FILE_KEYS,
-    [renderableFileEntries, settings.diffFilesCollapsed],
-  );
+  // Collapsed-by-default still opens files small enough to read at a glance.
+  // Lazy files have no hunks until loaded, so they size by their numstat.
+  const defaultCollapsedDiffFileKeys = useMemo(() => {
+    if (!settings.diffFilesCollapsed) return EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+    const changedLines = ({ fileDiff }: (typeof renderableFileEntries)[number]) => {
+      const stat = fileStats.get(resolveFileDiffPath(fileDiff)) ?? getDiffLineStat([fileDiff]);
+      return stat.additions + stat.deletions;
+    };
+    return new Set(
+      renderableFileEntries
+        .filter((file) => changedLines(file) >= DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES)
+        .map((file) => file.fileKey),
+    );
+  }, [fileStats, renderableFileEntries, settings.diffFilesCollapsed]);
   const collapsedDiffFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys

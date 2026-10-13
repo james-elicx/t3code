@@ -59,6 +59,9 @@ export interface DiffLineStat {
   deletions: number;
 }
 
+/** Files with fewer changed lines open expanded even when diffs default to collapsed. */
+export const DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES = 1200;
+
 export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
   return files.reduce<DiffLineStat>(
     (total, file) => {

@@ -37,6 +37,7 @@ import { canEditPullRequestComment, canResolvePullRequestThread } from "./pullRe
 import { orderDiffFiles } from "./pullRequestFileOrder.logic";
 import {
   buildFileDiffRenderKey,
+  DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES,
   fnv1a32,
   getDiffLineStat,
   getRenderablePatch,
@@ -220,8 +221,6 @@ function PullRequestCodeTab({
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   /** Set once the reader has asked for every file at once, until they pick a file apart again. */
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
-  const effectiveFoldOverride =
-    foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
   const diffLayout = settings.diffLayout;
   const updateClientSettings = useUpdateClientSettings();
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
@@ -552,33 +551,6 @@ function PullRequestCodeTab({
     [commit, detail.reviewThreads, draft, files, pendingComments, placedThreadIds],
   );
 
-  const items = useMemo<CodeViewDiffItem<ReviewAnnotationGroup>[]>(
-    () =>
-      annotatedFiles.map(({ fileKey, path, fileDiff, annotations, annotationsVersion }) => {
-        const collapsed = isFileDiffCollapsed(fileKey, effectiveFoldOverride, toggledFiles);
-        // Ticking a file that is already folded changes no fold, so without this the box on
-        // screen would keep saying the opposite of what the count says.
-        const viewedMark = filesViewedEnabled
-          ? `e${isFileViewed(path) ? "v" : ""}${isFileViewedStale(path) ? "s" : ""}`
-          : "";
-        return {
-          id: fileKey,
-          type: "diff" as const,
-          fileDiff,
-          annotations,
-          collapsed,
-          version: fnv1a32(`${collapsed ? "1" : "0"}:${viewedMark}:${annotationsVersion}`),
-        };
-      }),
-    [
-      annotatedFiles,
-      filesViewedEnabled,
-      effectiveFoldOverride,
-      isFileViewed,
-      isFileViewedStale,
-      toggledFiles,
-    ],
-  );
   const omittedFileStats = useMemo(
     () =>
       new Map(
@@ -604,6 +576,58 @@ function PullRequestCodeTab({
         ),
       ),
     [parsedSlices],
+  );
+  // Each file's fold until the toolbar overrides it: collapsed-by-default still opens files small
+  // enough to read at a glance. Withheld files have no hunks, so they size by their stat.
+  const fileFoldOverrides = useMemo(
+    () =>
+      new Map(
+        annotatedFiles.map(({ fileKey, path, fileDiff }): [string, DiffFoldOverride] => {
+          if (foldOverride !== null) return [fileKey, foldOverride];
+          if (!settings.diffFilesCollapsed) return [fileKey, "expanded"];
+          const stat = sourceFileStats.get(fileKey) ?? getDiffLineStat([fileDiff]);
+          const changedLines =
+            stat.additions + stat.deletions ||
+            (omittedFileStats.get(path)?.additions ?? 0) +
+              (omittedFileStats.get(path)?.deletions ?? 0);
+          return [
+            fileKey,
+            changedLines >= DIFF_FILE_AUTO_EXPAND_MAX_CHANGED_LINES ? "folded" : "expanded",
+          ];
+        }),
+      ),
+    [annotatedFiles, foldOverride, omittedFileStats, settings.diffFilesCollapsed, sourceFileStats],
+  );
+  const items = useMemo<CodeViewDiffItem<ReviewAnnotationGroup>[]>(
+    () =>
+      annotatedFiles.map(({ fileKey, path, fileDiff, annotations, annotationsVersion }) => {
+        const collapsed = isFileDiffCollapsed(
+          fileKey,
+          fileFoldOverrides.get(fileKey) ?? null,
+          toggledFiles,
+        );
+        // Ticking a file that is already folded changes no fold, so without this the box on
+        // screen would keep saying the opposite of what the count says.
+        const viewedMark = filesViewedEnabled
+          ? `e${isFileViewed(path) ? "v" : ""}${isFileViewedStale(path) ? "s" : ""}`
+          : "";
+        return {
+          id: fileKey,
+          type: "diff" as const,
+          fileDiff,
+          annotations,
+          collapsed,
+          version: fnv1a32(`${collapsed ? "1" : "0"}:${viewedMark}:${annotationsVersion}`),
+        };
+      }),
+    [
+      annotatedFiles,
+      filesViewedEnabled,
+      fileFoldOverrides,
+      isFileViewed,
+      isFileViewedStale,
+      toggledFiles,
+    ],
   );
   const fileKeys = useMemo(() => items.map((item) => item.id), [items]);
   const collapsedFileKeys = useMemo(
@@ -664,10 +688,15 @@ function PullRequestCodeTab({
     (fileKey: string, path: string, viewed: boolean) => {
       setViewed(path, viewed);
       setToggledFiles((current) =>
-        toggleFileDiffFoldForViewed(fileKey, viewed, effectiveFoldOverride, current),
+        toggleFileDiffFoldForViewed(
+          fileKey,
+          viewed,
+          fileFoldOverrides.get(fileKey) ?? null,
+          current,
+        ),
       );
     },
-    [effectiveFoldOverride, setViewed],
+    [fileFoldOverrides, setViewed],
   );
 
   const requestTreeReveal = useCodeViewFileReveal(viewer, scopeKey);
@@ -1593,7 +1622,12 @@ function PullRequestCodeTab({
             // Find can ask again before the unfolded file arrives, so this unfolds and never folds.
             onRevealSearchMatch={(item) =>
               setToggledFiles((current) =>
-                toggleFileDiffFoldForViewed(item.id, false, effectiveFoldOverride, current),
+                toggleFileDiffFoldForViewed(
+                  item.id,
+                  false,
+                  fileFoldOverrides.get(item.id) ?? null,
+                  current,
+                ),
               )
             }
             unsafeCSSExtra={REPLACE_FILE_COUNTS_CSS}
