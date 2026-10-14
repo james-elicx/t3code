@@ -1,5 +1,15 @@
 # T3 Code
 
+## Run this fork
+
+Build and start the server, then run the web UI in dev mode against it:
+
+```bash
+vp run --filter t3 build
+node apps/server/dist/bin.mjs --port 3773
+T3CODE_PORT_OFFSET=2239 vp run dev:web --port 3773
+```
+
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
@@ -132,16 +142,6 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 
 ```bash
 vp i
-```
-
-### Run this fork
-
-Build and start the server, then run the web UI in dev mode against it:
-
-```bash
-vp run --filter t3 build
-node apps/server/dist/bin.mjs --port 3773
-T3CODE_PORT_OFFSET=2239 vp run dev:web --port 3773
 ```
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
