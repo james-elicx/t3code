@@ -1,0 +1,19 @@
+apps/web/src/components/pullRequest/PullRequestCodeTab.tsx
+  s_cdad1616d6febb::t_ad7390b751fbb2 1620-1625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d9dae3795a6093565f46a015653a81ee496ab2ab",
+  "prompts": {},
+  "sessions": {
+    "s_cdad1616d6febb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08e496fa-8139-4338-8c27-86a56d25c157",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
