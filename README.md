@@ -134,6 +134,16 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 vp i
 ```
 
+### Run this fork
+
+Build and start the server, then run the web UI in dev mode against it:
+
+```bash
+vp run --filter t3 build
+node apps/server/dist/bin.mjs --port 3773
+T3CODE_PORT_OFFSET=2239 vp run dev:web --port 3773
+```
+
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
 
 Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
