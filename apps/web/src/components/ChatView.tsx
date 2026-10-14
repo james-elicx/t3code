@@ -7783,9 +7783,9 @@ export default function ChatView(props: ChatViewProps) {
           : "Compacting is unavailable right now"
     : null;
   // Tokens a stale Claude session would re-read on its next turn. While set,
-  // the composer shows a Compact chip and Enter compacts first; turning the
-  // chip off sends the next message with full history. Held queues and
-  // multi-model sends never compact first, so the offer hides for them.
+  // the composer shows a Compact chip; turning it on makes the next send
+  // compact first. Held queues and multi-model sends never compact first, so
+  // the offer hides for them.
   const resumeCompactionTokens =
     activeContextWindow &&
     !resumeCompactionPermanentlyDismissed &&
@@ -7803,18 +7803,17 @@ export default function ChatView(props: ChatViewProps) {
     })
       ? activeContextWindow.usedTokens
       : null;
-  // Threads whose Compact chip is turned off. A send that starts its turn
-  // clears its thread's entry; a failed send keeps it for the retry.
-  const [fullHistoryThreadKeys, setFullHistoryThreadKeys] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const keepFullHistory = fullHistoryThreadKeys.has(routeThreadKey);
+  // Threads whose Compact chip is turned on; the chip starts off so a send never
+  // compacts unasked. A send that starts its turn clears its thread's entry; a
+  // failed send keeps it for the retry.
+  const [compactThreadKeys, setCompactThreadKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const keepFullHistory = !compactThreadKeys.has(routeThreadKey);
   const setKeepFullHistory = useCallback((threadKey: string, keep: boolean) => {
-    setFullHistoryThreadKeys((current) => {
-      if (current.has(threadKey) === keep) return current;
+    setCompactThreadKeys((current) => {
+      if (current.has(threadKey) !== keep) return current;
       const next = new Set(current);
-      if (keep) next.add(threadKey);
-      else next.delete(threadKey);
+      if (keep) next.delete(threadKey);
+      else next.add(threadKey);
       return next;
     });
   }, []);
@@ -10088,7 +10087,7 @@ export default function ChatView(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
-        setKeepFullHistory(routeThreadKey, false);
+        setKeepFullHistory(routeThreadKey, true);
         // The turn is under way and will spend quota, so that thread's limits
         // snapshot is stale. Uploads may have outlasted a navigation, so only
         // the sending thread's panel clears.
