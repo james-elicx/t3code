@@ -62,6 +62,7 @@ import {
 } from "./GitActionsControl.logic";
 import { WizardPopup, WizardHeader, WizardSteps, WizardPanel, WizardFooter } from "./ui/wizard";
 import { StartTruncatedPath } from "./StartTruncatedPath";
+import { PullRequestGlyph } from "./pullRequest/pullRequestIcons";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
@@ -130,6 +131,8 @@ interface GitActionsControlProps {
   displayMode?: "toolbar" | "panel";
   compact?: boolean;
   onOpenChanges?: () => void;
+  /** Panel only: replaces the git actions with a row that opens the thread's pull request. */
+  onViewPullRequest?: (() => void) | undefined;
 }
 
 interface PendingDefaultBranchAction {
@@ -962,6 +965,7 @@ export default function GitActionsControl({
   displayMode = "toolbar",
   compact = false,
   onOpenChanges,
+  onViewPullRequest,
 }: GitActionsControlProps) {
   const isPanel = displayMode === "panel";
   const ActionGroup = isPanel ? "div" : Group;
@@ -1694,6 +1698,21 @@ export default function GitActionsControl({
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
         </ThreadDetailsControl>
+      ) : isPanel ? (
+        onViewPullRequest ? (
+          <ThreadDetailsControl
+            type="button"
+            variant="ghost"
+            size="sm"
+            part="row"
+            onClick={onViewPullRequest}
+          >
+            <PullRequestGlyph.pullRequest className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+            <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+              View PR
+            </span>
+          </ThreadDetailsControl>
+        ) : null
       ) : compact && !gitActionProgress && !visibleInlineSuccess ? null : (
         <ActionGroup
           role="group"

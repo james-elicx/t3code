@@ -27,7 +27,6 @@ import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { ThreadReviewActions } from "../ThreadReviewActions";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -49,8 +48,6 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
-  onOpenDiff?: (() => void) | undefined;
-  onOpenPullRequest?: (() => void) | undefined;
 }
 
 export function resolveRenameCommit(input: {
@@ -79,8 +76,6 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   onNewThreadInProject,
   onOpenProjectSettings,
-  onOpenDiff,
-  onOpenPullRequest,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -273,7 +268,7 @@ export const ChatHeader = memo(function ChatHeader({
     <div
       ref={breadcrumbContainerRef}
       className={cn(
-        "@container/chat-header flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
+        "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
         rightPanelOpen ? "pr-10" : "pr-24",
       )}
       onContextMenu={handleHeaderContextMenu}
@@ -403,11 +398,6 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {onOpenDiff || onOpenPullRequest ? (
-        <div className="flex shrink-0 items-center gap-1">
-          <ThreadReviewActions onOpenDiff={onOpenDiff} onOpenPullRequest={onOpenPullRequest} />
-        </div>
-      ) : null}
     </div>
   );
 });

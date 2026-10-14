@@ -7889,8 +7889,6 @@ export default function ChatView(props: ChatViewProps) {
             onOpenThread={onOpenRelatedThreadStable}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
             onNewThreadInProject={handleNewThreadInActiveProjectStable}
-            {...(isServerThread && isGitRepo ? { onOpenDiff: addDiffSurfaceStable } : {})}
-            {...(pullRequestSurfaceAvailable ? { onOpenPullRequest: addPullRequestSurfaceStable } : {})}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
               : {})}
