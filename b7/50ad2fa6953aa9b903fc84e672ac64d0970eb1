@@ -1,0 +1,21 @@
+apps/web/src/components/sidebar/SidebarThreadHeader.tsx
+  s_13b5c149ad88e3::t_fa5976612c150e 84
+apps/web/src/components/Sidebar.tsx
+  s_13b5c149ad88e3::t_98b417763170c2 4846-4850,4854-4859
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b750ad2fa6953aa9b903fc84e672ac64d0970eb1",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

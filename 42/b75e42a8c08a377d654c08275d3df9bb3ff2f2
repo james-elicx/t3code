@@ -1,0 +1,39 @@
+apps/web/src/components/AppSidebarLayout.tsx
+  s_13b5c149ad88e3::t_c424d574c11250 28,49,140-141
+apps/web/src/components/ChatView.tsx
+  s_13b5c149ad88e3::t_de7030cad08b12 6887,6889,6894
+apps/web/src/components/Sidebar.drag.test.ts
+  s_13b5c149ad88e3::t_1a4464f176ceb3 63,66,516,518,699-700
+apps/web/src/components/Sidebar.drag.ts
+  s_13b5c149ad88e3::t_92563360ce36b1 152,154-155
+apps/web/src/components/Sidebar.tsx
+  s_13b5c149ad88e3::t_b2c77cfb081c24 397,415,434,436-441,797,805,813-834,1271-1279,1507,1609-1618,1700,1829-1830,1834,1845,1854-1876,1883-1885,1888-1890,1897-1903,1905-1917,1919-1942,1943,1948-1955,1959-1963,1967-1975,1977-1983,1985-1991,1993-2000,2004-2005
+apps/web/src/components/chat/useComposerFocusState.test.tsx
+  s_13b5c149ad88e3::t_8e292deb41c3c3 56-59,61-65
+apps/web/src/components/chat/useComposerFocusState.ts
+  s_13b5c149ad88e3::t_53f95d569d095b 5-6
+apps/web/src/components/sidebar/SidebarChrome.tsx
+  s_13b5c149ad88e3::t_ba70e03b121b03 105
+apps/web/src/hooks/useResizableWidth.test.tsx
+  s_13b5c149ad88e3::t_695fd04c51a03a 55,60,64,257-268
+apps/web/src/hooks/useResizableWidth.ts
+  s_13b5c149ad88e3::t_45a1c2b381fd7b 24,68-71,73,76,85
+apps/web/src/components/chat/ChatComposer.tsx
+  s_13b5c149ad88e3::t_b92bcf20442553 1452-1453,2513-2515,3583,3711,5249-5258,5262,5265,6470-6477,6789
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "42b75e42a8c08a377d654c08275d3df9bb3ff2f2",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
