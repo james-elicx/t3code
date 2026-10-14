@@ -272,6 +272,12 @@ export function resolveClaudeCatalogApiModelId(
     );
     if (typeof value === "string" && suffixes[value]) return `${slug}${suffixes[value]}`;
   }
+  // A bare slug runs with a 200k window behind gateways and third-party providers
+  // (`ANTHROPIC_BASE_URL`), so ask for the 1M window explicitly. That keeps
+  // Claude Code from auto-compacting at ~168k.
+  if (entry?.runtime.fixedContextWindowTokens === 1_000_000 && !slug.endsWith("[1m]")) {
+    return `${slug}[1m]`;
+  }
   return slug;
 }
 

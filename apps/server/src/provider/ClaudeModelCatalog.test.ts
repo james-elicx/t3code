@@ -118,6 +118,39 @@ describe("Claude model catalog", () => {
     );
   });
 
+  it("asks for the 1M window explicitly on fixed 1M models only", () => {
+    const source = manifest();
+    const fixedProfile = (tokens: number) => ({
+      capabilities: { optionDescriptors: [] },
+      adapter: { claudeCode: { fixedContextWindowTokens: tokens } },
+    });
+    const catalog = catalogFromManifest({
+      ...source,
+      providers: {
+        claudeAgent: {
+          ...source.providers!.claudeAgent!,
+          profiles: { million: fixedProfile(1_000_000), small: fixedProfile(200_000) },
+          models: [
+            { slug: "claude-million", name: "Million", status: "current", profile: "million" },
+            { slug: "claude-small", name: "Small", status: "current", profile: "small" },
+          ],
+        },
+      },
+    });
+    const selection = (model: string) => ({
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model,
+    });
+    assert.strictEqual(
+      resolveClaudeCatalogApiModelId(catalog, selection("claude-million")),
+      "claude-million[1m]",
+    );
+    assert.strictEqual(
+      resolveClaudeCatalogApiModelId(catalog, selection("claude-small")),
+      "claude-small",
+    );
+  });
+
   it("filters models at runtime-version boundaries and derives the upgrade message", () => {
     const catalog = catalogFromManifest(manifest());
     assert.deepStrictEqual(resolveClaudeModelsForVersion(catalog, "3.1.9"), []);
