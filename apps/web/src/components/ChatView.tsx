@@ -11325,7 +11325,6 @@ export default function ChatView(props: ChatViewProps) {
       : {}),
     onComposerFocusRequest: scheduleComposerFocus,
     ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanel } : {}),
-    ...(pullRequestSurfaceAvailable ? { onViewPullRequest: addPullRequestSurface } : {}),
     onRunProjectScript: runProjectScript,
     onAddProjectScript: saveProjectScript,
     onUpdateProjectScript: updateProjectScript,
