@@ -11325,6 +11325,7 @@ export default function ChatView(props: ChatViewProps) {
       : {}),
     onComposerFocusRequest: scheduleComposerFocus,
     ...(isServerThread && isGitRepo ? { onOpenChanges: openChangesFromThreadPanel } : {}),
+    ...(pullRequestSurfaceAvailable ? { onViewPullRequest: addPullRequestSurface } : {}),
     onRunProjectScript: runProjectScript,
     onAddProjectScript: saveProjectScript,
     onUpdateProjectScript: updateProjectScript,
@@ -11476,8 +11477,6 @@ export default function ChatView(props: ChatViewProps) {
             onOpenThread={onOpenRelatedThread}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
             onNewThreadInProject={handleNewThreadInActiveProject}
-            {...(isServerThread && isGitRepo ? { onOpenDiff: addDiffSurface } : {})}
-            {...(pullRequestSurfaceAvailable ? { onOpenPullRequest: addPullRequestSurface } : {})}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
