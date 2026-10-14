@@ -1694,7 +1694,7 @@ export default function GitActionsControl({
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
         </ThreadDetailsControl>
-      ) : compact && !gitActionProgress && !visibleInlineSuccess ? null : (
+      ) : (compact || isPanel) && !gitActionProgress && !visibleInlineSuccess ? null : (
         <ActionGroup
           role="group"
           aria-label="Git actions"
