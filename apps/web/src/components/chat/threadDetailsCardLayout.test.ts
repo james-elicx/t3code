@@ -23,6 +23,16 @@ describe("workspace card", () => {
     });
     expect(resolve(1344, 900)).toMatchObject({ x: 1052, width: 280 });
   });
+  it("scales its width with the interface font size", () => {
+    expect(
+      resolveThreadDetailsCardLayout({
+        container: { width: 1600, height: 900 },
+        lane,
+        frame: null,
+        rootFontSize: 14,
+      }),
+    ).toMatchObject({ x: 1343, width: 245 });
+  });
   it("starts below the open find bar, keeping the bottom inset", () => {
     expect(
       resolveThreadDetailsCardLayout({

@@ -4,7 +4,7 @@ import { DETAILS_CARD_CLEARANCE } from "./chatCanvasLayout";
 /** Inset of the card from the canvas edges; the find bar shares it to line up. */
 export const THREAD_DETAILS_CARD_GAP = 12;
 // Keep in sync with --thread-details-panel-width, which sizes the popover and the find bar.
-const THREAD_DETAILS_CARD_WIDTH = 280;
+const THREAD_DETAILS_CARD_WIDTH_REM = 17.5;
 
 export function resolveThreadDetailsCardDensity(
   height: number,
@@ -25,6 +25,7 @@ export function resolveThreadDetailsCardLayout({
   frame,
   overlapsDetailsCard = false,
   topInset = 0,
+  rootFontSize = 16,
 }: {
   container: { width: number; height: number };
   lane: { padding: number; minChatWidth: number };
@@ -32,9 +33,11 @@ export function resolveThreadDetailsCardLayout({
   overlapsDetailsCard?: boolean;
   /** Space taken above the card, such as the open find bar. */
   topInset?: number;
+  /** The interface font size, so the card scales with its rem-sized content. */
+  rootFontSize?: number;
 }) {
   const gap = THREAD_DETAILS_CARD_GAP;
-  const width = THREAD_DETAILS_CARD_WIDTH;
+  const width = THREAD_DETAILS_CARD_WIDTH_REM * rootFontSize;
   const x = container.width - width - gap;
   if (x - DETAILS_CARD_CLEARANCE - lane.padding < lane.minChatWidth) return null;
   const y = gap + topInset;

@@ -12,6 +12,8 @@ import {
   resolveThreadDetailsCardLayout,
 } from "./threadDetailsCardLayout";
 import { observeResize } from "../../lib/observeResize";
+import { useClientSettings } from "../../hooks/useSettings";
+import { clampInterfaceFontSize } from "../../appearanceFonts";
 
 /** One card owns its placement and folds content only when that content cannot fit. */
 export function ThreadDetailsCard({
@@ -28,12 +30,16 @@ export function ThreadDetailsCard({
   children: (density: "full" | "compact" | "essential") => ReactNode;
 }) {
   const canvas = useChatCanvas();
+  const rootFontSize = clampInterfaceFontSize(
+    useClientSettings((settings) => settings.fontSizeInterface),
+  );
   const preferredPlacement = canvas
     ? resolveThreadDetailsCardLayout({
         container: canvas.container,
         lane: canvas.lane,
         frame: null,
         topInset: canvas.detailsCardTopInset,
+        rootFontSize,
       })
     : null;
   const placement = canvas
@@ -43,6 +49,7 @@ export function ThreadDetailsCard({
         frame: canvas.layout.frame,
         overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
         topInset: canvas.detailsCardTopInset,
+        rootFontSize,
       })
     : null;
   const mode = placement ? "inline" : "popover";
