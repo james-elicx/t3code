@@ -2762,6 +2762,7 @@ function OpenCommandPaletteDialog(props: {
       await browseNavigation.run(
         () => prefetchBrowsePath(getBrowseDirectoryPath(nextQuery)),
         () => {
+          highlightClearedRef.current = true;
           setHighlightedItemValue(null);
           setQuery(nextQuery);
           setBrowseGeneration((generation) => generation + 1);
@@ -2788,6 +2789,7 @@ function OpenCommandPaletteDialog(props: {
     await browseNavigation.run(
       () => prefetchBrowsePath(parentPath),
       () => {
+        highlightClearedRef.current = true;
         setHighlightedItemValue(null);
         setQuery(nextQuery);
         setBrowseGeneration((generation) => generation + 1);
