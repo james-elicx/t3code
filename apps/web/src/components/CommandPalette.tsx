@@ -2526,7 +2526,7 @@ function OpenCommandPaletteDialog(props: {
     }
   }
 
-  const browseTo = async (name: string): Promise<void> => {
+  const browseTo = useStableCallback(async (name: string): Promise<void> => {
     const nextQuery = pinnedCloneDirectoryName
       ? getCloneDestinationBrowsePath({
           browseDirectoryPath: browsePath.directoryPath,
@@ -2538,14 +2538,15 @@ function OpenCommandPaletteDialog(props: {
     await browseNavigation.run(
       () => prefetchBrowsePath(getBrowseDirectoryPath(nextQuery)),
       () => {
+        highlightClearedRef.current = true;
         setHighlightedItemValue(null);
         setQuery(nextQuery);
         setBrowseGeneration((generation) => generation + 1);
       },
     );
-  };
+  });
 
-  const browseUp = async (): Promise<void> => {
+  const browseUp = useStableCallback(async (): Promise<void> => {
     const parentPath = browsePath.parentPath;
     if (parentPath === null) {
       return;
@@ -2555,12 +2556,13 @@ function OpenCommandPaletteDialog(props: {
     await browseNavigation.run(
       () => prefetchBrowsePath(parentPath),
       () => {
+        highlightClearedRef.current = true;
         setHighlightedItemValue(null);
         setQuery(nextQuery);
         setBrowseGeneration((generation) => generation + 1);
       },
     );
-  };
+  });
 
   const resolvedAddProjectPath = hasTrailingPathSeparator(query)
     ? (browseResult?.parentPath ?? query.trim())
