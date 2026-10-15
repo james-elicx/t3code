@@ -448,18 +448,18 @@ export function filterCommandPaletteGroups(input: {
         items: input.projectSearchItems,
       });
     }
-    if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {
-      searchableGroups.push({
-        value: "settings-search",
-        label: "Settings",
-        items: input.settingsSearchItems,
-      });
-    }
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
         label: "Threads",
         items: input.threadSearchItems,
+      });
+    }
+    if (input.settingsSearchItems && input.settingsSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "settings-search",
+        label: "Settings",
+        items: input.settingsSearchItems,
       });
     }
   }

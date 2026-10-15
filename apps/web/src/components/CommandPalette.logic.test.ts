@@ -850,6 +850,31 @@ describe("filterCommandPaletteGroups", () => {
       "setting:keybinding-modelPicker.toggle",
     ]);
   });
+
+  it("lists settings results after threads", () => {
+    const item = (value: string) =>
+      ({
+        kind: "action",
+        value,
+        title: "Theme",
+        searchTerms: ["Theme"],
+        icon: null,
+        run: async () => undefined,
+      }) satisfies CommandPaletteActionItem;
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "theme",
+      isInSubmenu: false,
+      projectSearchItems: [item("project:theme")],
+      settingsSearchItems: [item("setting:theme")],
+      threadSearchItems: [item("thread:theme")],
+    });
+    expect(groups.map((group) => group.value)).toEqual([
+      "projects-search",
+      "threads-search",
+      "settings-search",
+    ]);
+  });
 });
 
 describe("virtualized command palette rows", () => {
