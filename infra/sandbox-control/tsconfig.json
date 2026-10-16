@@ -3,7 +3,20 @@
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023", "WebWorker"],
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        // Plain Worker code, not Effect. Severities deep-merge with tsconfig.base.json.
+        "diagnosticSeverity": {
+          "globalDate": "off",
+          "globalConsole": "off",
+          "globalFetch": "off",
+          "globalTimers": "off",
+          "nodeBuiltinImport": "off"
+        }
+      }
+    ]
   },
   "include": ["scripts/**/*.ts", "src/**/*.ts"]
 }

@@ -131,7 +131,7 @@ export interface ReceivePackCommands {
 const encoder = new TextEncoder();
 
 /** Encodes one pkt-line. */
-export function pktLine(payload: string | Uint8Array): Uint8Array {
+export function pktLine(payload: string | Uint8Array): Uint8Array<ArrayBuffer> {
   const bytes = typeof payload === "string" ? encoder.encode(payload) : payload;
   const out = new Uint8Array(bytes.length + 4);
   out.set(encoder.encode((bytes.length + 4).toString(16).padStart(4, "0")));
@@ -160,7 +160,7 @@ const concat = (parts: ReadonlyArray<Uint8Array>) => {
 export function receivePackRejection(
   commands: Pick<ReceivePackCommands, "updates" | "capabilities">,
   rejected: ReadonlyMap<string, string>,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const report = concat([
     pktLine("unpack ok\n"),
     ...commands.updates.map((update) =>
