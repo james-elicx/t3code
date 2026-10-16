@@ -1,0 +1,21 @@
+{
+  "name": "t3code-sandbox-control",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "stage": "node scripts/stage-t3.ts",
+    "mock": "node scripts/mock-upstream.ts",
+    "e2e": "node scripts/e2e.ts",
+    "test": "vp test run --config ../../vite.config.ts --dir .",
+    "typecheck": "tsc-rs --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261004.1",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "wrangler": "4.150.0",
+    "ws": "^8.18.0"
+  }
+}
