@@ -1,3 +1,6 @@
 .wrangler/
 .dev.vars
 container/t3-dist/
+.web-dist/
+test-results/
+playwright-report/

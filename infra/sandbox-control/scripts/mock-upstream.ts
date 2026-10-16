@@ -71,7 +71,7 @@ const record = (request: IncomingMessage, body: Buffer) => {
   let fields: { model?: unknown; stream?: unknown } = {};
   try {
     if (request.headers["content-type"]?.includes("json"))
-      fields = JSON.parse(body.toString("utf8"));
+      fields = JSON.parse(new TextDecoder().decode(body));
   } catch {}
   const printable = /^[\x09\x0a\x0d\x20-\x7e]*$/.test(
     new TextDecoder("latin1").decode(body.subarray(0, 2048)),
@@ -115,7 +115,7 @@ function anthropic(url: URL, body: Buffer, response: ServerResponse) {
 
   let input: { model?: string; stream?: boolean } = {};
   try {
-    input = JSON.parse(body.toString("utf8"));
+    input = JSON.parse(new TextDecoder().decode(body));
   } catch {}
   const model = input.model ?? "claude-opus-5-5";
   const usage = { input_tokens: 12, output_tokens: 9 };
@@ -242,7 +242,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname.startsWith("/github-api/")) {
     const path = url.pathname.slice("/github-api".length);
     if (request.method === "POST" && path === "/repos/acme/demo/pulls") {
-      const input = JSON.parse(body.toString("utf8")) as { head: string; base: string };
+      const input = JSON.parse(new TextDecoder().decode(body)) as { head: string; base: string };
       return json(response, 201, {
         number: 7,
         node_id: "PR_kwDOmock7",

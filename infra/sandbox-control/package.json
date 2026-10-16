@@ -3,15 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:web": "cd ../../apps/web && VITE_HOSTED_APP_URL=${SANDBOX_APP_URL:-http://localhost:8787} VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes vp build --outDir ../../infra/sandbox-control/.web-dist --emptyOutDir",
     "dev": "wrangler dev",
     "stage": "node scripts/stage-t3.ts",
     "mock": "node scripts/mock-upstream.ts",
     "e2e": "node scripts/e2e.ts",
+    "e2e:ui": "playwright test",
     "test": "vp test run --config ../../vite.config.ts --dir .",
     "typecheck": "tsc-rs --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261004.1",
+    "@playwright/test": "1.60.0",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",
     "typescript": "catalog:",

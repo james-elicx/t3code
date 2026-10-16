@@ -5,10 +5,11 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  // The hosted web client (apps/web build) on the apex, with SPA fallback.
-  // The Worker runs first so sandbox subdomains and /api never reach assets.
+  // The hosted web client on the apex, with SPA fallback: apps/web built in
+  // sandbox mode by `vp run build:web`. The Worker runs first so sandbox
+  // subdomains and /api never reach assets.
   "assets": {
-    "directory": "../../apps/web/dist",
+    "directory": "./.web-dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": true,
