@@ -1,0 +1,49 @@
+infra/sandbox-control/.dev.vars.example
+  s_927e0e23985343::t_314cca12b7f257 1-3
+infra/sandbox-control/container/Dockerfile
+  s_927e0e23985343::t_0ea02e903c2a11 1-26
+infra/sandbox-control/container/entrypoint.sh
+  s_927e0e23985343::t_cdf10f9c200974 1-18
+infra/sandbox-control/container/runtime-package.json
+  s_927e0e23985343::t_d5fe42ab340788 1-12
+infra/sandbox-control/package.json
+  s_927e0e23985343::t_9cbcfdf0d771b1 16,20
+infra/sandbox-control/scripts/e2e.ts
+  s_927e0e23985343::t_9309d8abf4835d 1-289
+infra/sandbox-control/scripts/mock-upstream.ts
+  s_927e0e23985343::t_1f425d755927a8 1-187
+infra/sandbox-control/scripts/stage-t3.ts
+  s_927e0e23985343::t_df8ad94aadc13d 1-21
+infra/sandbox-control/src/ThreadSandbox.ts
+  s_927e0e23985343::t_4e8e5767b86a6b 1-415
+infra/sandbox-control/src/egress/pktLine.ts
+  s_927e0e23985343::t_2b8f0b3f1ac39d 134,163
+infra/sandbox-control/src/worker.ts
+  s_927e0e23985343::t_f9703fdbba9b7b 1-121
+infra/sandbox-control/tsconfig.json
+  s_927e0e23985343::t_76a38705960984 6-19
+infra/sandbox-control/wrangler.jsonc
+  s_927e0e23985343::t_6d800ade8e54ae 1-49
+pnpm-lock.yaml
+  s_927e0e23985343::t_5f56f56276c50a 33-35,84-86,1074-1076,1087
+infra/sandbox-control/src/SandboxDirectory.ts
+  s_927e0e23985343::t_c8386f3b868eff 1-27
+infra/sandbox-control/src/wsBridge.ts
+  s_927e0e23985343::t_ff1b799749a895 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ef72be5da5671b3092183ea0e7b61ff500fa4d6d",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
