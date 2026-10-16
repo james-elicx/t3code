@@ -111,7 +111,9 @@ Access cookie and token are removed before a request reaches a sandbox. This mat
 Worker lets through gets admin on every sandbox, because the proxy adds each sandbox's credential
 for them.
 
-1. **AI Gateway and GitHub.** Create a gateway with an Anthropic key stored in it (BYOK). Create a
+1. **AI Gateway and GitHub.** Create a gateway with an Anthropic key stored in it (BYOK), with
+   authentication on. It can be in a different account from the Worker; `AI_GATEWAY_TOKEN` is that
+   gateway's token. Create a
    write PAT for pushes and PRs. A read PAT is optional: without one, the session repository is
    fetched anonymously, so only public repos work.
 2. **The web build for the workers.dev origin:**
@@ -120,7 +122,8 @@ for them.
    outside the repo, then:
 
    ```sh
-   CLOUDFLARE_ACCOUNT_ID=<account> SANDBOX_AI_GATEWAY=<gateway> \
+   CLOUDFLARE_ACCOUNT_ID=<worker account> \
+   SANDBOX_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<gateway account>/<gateway> \
      vp run deploy:test --secrets-file <file>
    ```
 

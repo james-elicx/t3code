@@ -27,9 +27,8 @@ function deployedVars() {
     if (!value) throw new Error(`--mode test needs ${name} in the environment.`);
     return value;
   };
-  const accountId = required("CLOUDFLARE_ACCOUNT_ID");
   return {
-    AI_GATEWAY_BASE_URL: `https://gateway.ai.cloudflare.com/v1/${accountId}/${required("SANDBOX_AI_GATEWAY")}`,
+    AI_GATEWAY_BASE_URL: aiGatewayBaseUrl(required("SANDBOX_AI_GATEWAY_URL")),
     GITHUB_ORIGIN: "https://github.com",
     GITHUB_API_ORIGIN: "https://api.github.com",
     DEBUG_EXEC: "0",
@@ -37,6 +36,21 @@ function deployedVars() {
     ACCESS_TEAM_DOMAIN: process.env.SANDBOX_ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "") ?? "",
     ACCESS_AUD: process.env.SANDBOX_ACCESS_AUD?.trim() ?? "",
   };
+}
+
+/**
+ * The gateway's base URL, from its endpoint as the dashboard shows it. The
+ * gateway may live in a different account from the Worker. A pasted provider
+ * suffix such as `/anthropic` is dropped; the egress broker adds its own.
+ */
+function aiGatewayBaseUrl(endpoint: string) {
+  const match = /^https:\/\/gateway\.ai\.cloudflare\.com\/v1\/([^/]+)\/([^/]+)/.exec(endpoint);
+  if (!match) {
+    throw new Error(
+      "SANDBOX_AI_GATEWAY_URL must look like https://gateway.ai.cloudflare.com/v1/<account>/<gateway>.",
+    );
+  }
+  return `https://gateway.ai.cloudflare.com/v1/${match[1]}/${match[2]}`;
 }
 
 const localVars = {
