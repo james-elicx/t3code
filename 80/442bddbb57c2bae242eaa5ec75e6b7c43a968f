@@ -1,0 +1,19 @@
+infra/sandbox-control/README.md
+  s_927e0e23985343::t_59a95d73bc8c3e 18-28,48,53-67,73-101,105-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80442bddbb57c2bae242eaa5ec75e6b7c43a968f",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
