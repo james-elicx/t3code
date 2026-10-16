@@ -15,6 +15,11 @@ RUN npm install --omit=dev --no-audit --no-fund
 RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.301 \
   && claude --version
 
+# Toolchain for the agent, matching cloudflare/vinext: Node 24 (the base image),
+# pnpm 11.1.1 (its packageManager) and Vite+ 1.1.0 (its catalog).
+RUN npm install --global --no-audit --no-fund pnpm@11.1.1 vite-plus@1.1.0 \
+  && node --version && pnpm --version && vp --version
+
 # This branch's server bundle, staged by `vp run stage` (scripts/stage-t3.ts).
 COPY t3-dist/ dist/
 COPY sandbox-settings.json /opt/t3/sandbox-settings.json
