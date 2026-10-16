@@ -1,0 +1,49 @@
+apps/web/src/components/CommandPalette.tsx
+  s_927e0e23985343::t_7753765cebf4b8 61,81,238-244,1064,1869-1913
+apps/web/src/connection/platform.ts
+  s_927e0e23985343::t_bc3dfc8aa1ad40 53,573-574
+apps/web/src/hooks/useHandleNewThread.ts
+  s_927e0e23985343::t_85b58139690477 40,88-96
+apps/web/src/routeTree.gen.ts
+  s_927e0e23985343::t_9bf49c8eb355cf 35,156-160,193,221,252,284,312,342,537-543,578,587
+apps/web/src/routes/__root.tsx
+  s_927e0e23985343::t_eacc4f190dab24 25,246-247
+apps/web/src/routes/_chat.index.tsx
+  s_927e0e23985343::t_b4863663033243 8-9,33-35
+apps/web/src/routes/_chat.sandbox.tsx
+  s_927e0e23985343::t_228748560e5d96 1-35
+apps/web/src/sandboxes/SandboxLauncher.tsx
+  s_927e0e23985343::t_26c34537e236b6 1-173
+apps/web/src/sandboxes/directory.test.ts
+  s_47a6dfe0901c61::t_ffb4be5f47e085 1-63
+apps/web/src/sandboxes/directory.ts
+  s_927e0e23985343::t_3106fdda7a4e24 1-155
+apps/web/src/vite-env.d.ts
+  s_927e0e23985343::t_0ee93bba2eebf1 10
+apps/web/vite.config.ts
+  s_927e0e23985343::t_49a2fa3723d688 46,222-223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "30db5b4beec8e10abf62f41acc6af3d2b4aa61d3",
+  "prompts": {},
+  "sessions": {
+    "s_47a6dfe0901c61": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f298ca18-398c-4093-bf38-eb7f0ce60c99",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    },
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
