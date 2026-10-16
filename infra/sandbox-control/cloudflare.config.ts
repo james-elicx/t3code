@@ -13,6 +13,8 @@ const WORKER_NAME = "t3-sandbox-control";
 const threadSandboxContainer = defineContainer({
   name: `${WORKER_NAME}-thread-sandbox`,
   schedulingPolicy: "durable-object",
+  // Each sandbox's stdout and stderr: T3's boot, the clone, Claude Code.
+  observability: { enabled: true, logs: { enabled: true } },
   // Built from this branch's T3 server; run `vp run stage` first.
   images: { t3: { dockerfile: "./container/Dockerfile" } },
 });
@@ -54,7 +56,14 @@ export default defineConfig(({ mode }) => {
       compatibilityDate: "2026-10-01",
       compatibilityFlags: ["nodejs_compat"],
       entrypoint: "src/worker.ts",
-      observability: { enabled: true },
+      // Everything, unsampled: logs with invocation logs, traces, and Issues.
+      observability: {
+        enabled: true,
+        headSamplingRate: 1,
+        logs: { enabled: true, headSamplingRate: 1, invocationLogs: true },
+        traces: { enabled: true, headSamplingRate: 1 },
+        issues: { enabled: true },
+      },
       // The one public hostname, behind Cloudflare Access. Version preview URLs
       // stay off: they are extra hostnames to protect, and previews do not
       // support Durable Object-managed Containers anyway.
