@@ -55,9 +55,13 @@ export function parseAssetCollectionKey(
   }
 }
 
+/** Resolves a server-relative asset URL below the base URL's path prefix, if any. */
 export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): string | null {
   try {
-    return new URL(relativeUrl, httpBaseUrl).toString();
+    const base = new URL(httpBaseUrl);
+    if (!base.pathname.endsWith("/")) base.pathname += "/";
+    const relative = /^\/(?!\/)/.test(relativeUrl) ? `.${relativeUrl}` : relativeUrl;
+    return new URL(relative, base).toString();
   } catch {
     return null;
   }

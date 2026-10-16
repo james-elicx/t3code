@@ -4,6 +4,7 @@ import {
   classifyHostedHttpsCompatibility,
   createAdvertisedEndpoint,
   deriveWsBaseUrl,
+  environmentEndpointUrl,
   normalizeHttpBaseUrl,
 } from "./endpoint.ts";
 
@@ -57,5 +58,25 @@ describe("advertised endpoint helpers", () => {
       status: "available",
       isDefault: true,
     });
+  });
+});
+
+describe("environmentEndpointUrl", () => {
+  it("resolves server paths at the origin root", () => {
+    expect(environmentEndpointUrl("https://example.com", "/api/auth/session")).toBe(
+      "https://example.com/api/auth/session",
+    );
+    expect(environmentEndpointUrl("https://example.com/?x=1", "/oauth/token")).toBe(
+      "https://example.com/oauth/token",
+    );
+  });
+
+  it("keeps the path prefix of an environment served behind a proxy", () => {
+    expect(environmentEndpointUrl("https://host.example/s/t-abc", "/api/auth/session")).toBe(
+      "https://host.example/s/t-abc/api/auth/session",
+    );
+    expect(environmentEndpointUrl("https://host.example/s/t-abc/", "/oauth/token")).toBe(
+      "https://host.example/s/t-abc/oauth/token",
+    );
   });
 });
