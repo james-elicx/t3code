@@ -1,0 +1,8 @@
+{
+  "defaultModelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-5-5" },
+  "textGenerationModelSelection": { "instanceId": "claudeAgent", "model": "claude-haiku-5-5" },
+  "providerInstances": {
+    "claudeAgent": { "driver": "claudeAgent" },
+    "codex": { "driver": "codex", "enabled": false }
+  }
+}

@@ -3,7 +3,8 @@
  * Local stand-in for every upstream the egress broker talks to, so proofs run
  * without real credentials or network:
  *
- *   /gateway/...     Cloudflare AI Gateway: answers like the Messages API.
+ *   /gateway/...     Cloudflare AI Gateway: answers like the Messages API,
+ *                    streaming when asked, as the Claude CLI does.
  *   /github-api/...  api.github.com: creating a pull request returns #7.
  *   /github/...      github.com git smart HTTP, served by `git http-backend`
  *                    over a seeded bare repository `acme/demo`.
@@ -50,6 +51,9 @@ interface Recorded {
   readonly headers: Record<string, string>;
   readonly body: string;
   readonly bodyBytes: number;
+  /** For JSON bodies: the fields the proofs check, read before the body is cut. */
+  readonly model?: string;
+  readonly stream?: boolean;
 }
 let recorded: Recorded[] = [];
 
@@ -64,6 +68,11 @@ const record = (request: IncomingMessage, body: Buffer) => {
   for (const [name, value] of Object.entries(request.headers)) {
     headers[name] = Array.isArray(value) ? value.join(", ") : (value ?? "");
   }
+  let fields: { model?: unknown; stream?: unknown } = {};
+  try {
+    if (request.headers["content-type"]?.includes("json"))
+      fields = JSON.parse(body.toString("utf8"));
+  } catch {}
   const printable = /^[\x09\x0a\x0d\x20-\x7e]*$/.test(
     new TextDecoder("latin1").decode(body.subarray(0, 2048)),
   );
@@ -76,6 +85,8 @@ const record = (request: IncomingMessage, body: Buffer) => {
       ? new TextDecoder().decode(body.subarray(0, 2048))
       : `<${body.length} binary bytes>`,
     bodyBytes: body.length,
+    ...(typeof fields.model === "string" ? { model: fields.model } : {}),
+    ...(typeof fields.stream === "boolean" ? { stream: fields.stream } : {}),
   });
 };
 
@@ -83,6 +94,80 @@ const json = (response: ServerResponse, status: number, value: unknown) => {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(value, null, 2));
 };
+
+const MOCK_REPLY = "Hello from the mock AI Gateway.";
+
+/** The Messages API surface the Claude CLI uses, behind AI Gateway's `/anthropic` prefix. */
+function anthropic(url: URL, body: Buffer, response: ServerResponse) {
+  const path = url.pathname.replace(/^\/gateway\/v1\/[^/]+\/[^/]+\/anthropic/, "");
+  if (path === "/v1/messages/count_tokens") return json(response, 200, { input_tokens: 12 });
+  if (path.startsWith("/v1/models")) {
+    return json(response, 200, {
+      data: [{ type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5" }],
+      has_more: false,
+    });
+  }
+  if (path !== "/v1/messages")
+    return json(response, 404, {
+      type: "error",
+      error: { type: "not_found_error", message: path },
+    });
+
+  let input: { model?: string; stream?: boolean } = {};
+  try {
+    input = JSON.parse(body.toString("utf8"));
+  } catch {}
+  const model = input.model ?? "claude-opus-5-5";
+  const usage = { input_tokens: 12, output_tokens: 9 };
+  if (!input.stream) {
+    return json(response, 200, {
+      id: "msg_mock_gateway",
+      type: "message",
+      role: "assistant",
+      model,
+      content: [{ type: "text", text: MOCK_REPLY }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage,
+    });
+  }
+  response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  const send = (event: string, data: unknown) =>
+    response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  send("message_start", {
+    type: "message_start",
+    message: {
+      id: "msg_mock_gateway",
+      type: "message",
+      role: "assistant",
+      model,
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: usage.input_tokens, output_tokens: 1 },
+    },
+  });
+  send("content_block_start", {
+    type: "content_block_start",
+    index: 0,
+    content_block: { type: "text", text: "" },
+  });
+  for (const text of ["Hello from ", "the mock ", "AI Gateway."]) {
+    send("content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text },
+    });
+  }
+  send("content_block_stop", { type: "content_block_stop", index: 0 });
+  send("message_delta", {
+    type: "message_delta",
+    delta: { stop_reason: "end_turn", stop_sequence: null },
+    usage: { output_tokens: usage.output_tokens },
+  });
+  send("message_stop", { type: "message_stop" });
+  response.end();
+}
 
 function gitHttpBackend(request: IncomingMessage, response: ServerResponse, body: Buffer) {
   const url = new URL(request.url ?? "/", "http://mock");
@@ -153,17 +238,7 @@ const server = createServer(async (request, response) => {
   const body = await readBody(request);
   record(request, body);
 
-  if (url.pathname.startsWith("/gateway/")) {
-    return json(response, 200, {
-      id: "msg_mock_gateway",
-      type: "message",
-      role: "assistant",
-      model: "claude-sonnet-5",
-      content: [{ type: "text", text: "Hello from the mock AI Gateway." }],
-      stop_reason: "end_turn",
-      usage: { input_tokens: 1, output_tokens: 7 },
-    });
-  }
+  if (url.pathname.startsWith("/gateway/")) return anthropic(url, body, response);
   if (url.pathname.startsWith("/github-api/")) {
     const path = url.pathname.slice("/github-api".length);
     if (request.method === "POST" && path === "/repos/acme/demo/pulls") {

@@ -11,8 +11,13 @@ WORKDIR /opt/t3
 COPY runtime-package.json package.json
 RUN npm install --omit=dev --no-audit --no-fund
 
+# The Claude Code CLI the server drives. Opus 5.5, the default, needs 2.1.280 or newer.
+RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.301 \
+  && claude --version
+
 # This branch's server bundle, staged by `vp run stage` (scripts/stage-t3.ts).
 COPY t3-dist/ dist/
+COPY sandbox-settings.json /opt/t3/sandbox-settings.json
 COPY entrypoint.sh /usr/local/bin/t3-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/t3-sandbox-entrypoint \
   && mkdir -p /t3home /workspace \

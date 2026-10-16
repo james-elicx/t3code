@@ -352,10 +352,15 @@ export class ThreadSandbox extends DurableObject<Env> {
       ...SANDBOX_PLACEHOLDER_ENV,
       T3CODE_HOME: T3_HOME,
       T3_SANDBOX_THREAD_ID: record.threadId,
+      T3_SANDBOX_REPO: `${record.repo.owner}/${record.repo.name}`,
+      T3_SANDBOX_BRANCH: `${record.branchPrefix}work`,
       // The intercept terminates TLS with a per-instance CA; trust it explicitly too.
       NODE_EXTRA_CA_CERTS: CA_PATH,
       GIT_TERMINAL_PROMPT: "0",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+      DISABLE_AUTOUPDATER: "1",
+      // The container is the sandbox; Claude refuses to skip permissions as root otherwise.
+      IS_SANDBOX: "1",
     };
   }
 
