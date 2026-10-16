@@ -4,3 +4,4 @@ container/t3-dist/
 .web-dist/
 test-results/
 playwright-report/
+.cloudflare/

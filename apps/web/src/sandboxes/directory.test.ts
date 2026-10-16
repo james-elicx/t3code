@@ -16,18 +16,20 @@ const entry = (overrides: Partial<SandboxEntry> = {}): SandboxEntry => ({
   repo: "acme/demo",
   environmentId: "env-1",
   lastError: null,
-  httpBaseUrl: "https://t-abc123.sandbox.example.com",
-  wsBaseUrl: "wss://t-abc123.sandbox.example.com",
+  httpBaseUrl: "https://control.example.workers.dev/s/t-abc123",
+  wsBaseUrl: "wss://control.example.workers.dev/s/t-abc123/ws",
   ...overrides,
 });
 
 describe("sandboxRegistration", () => {
-  it("connects to the sandbox's own origin under its environment id", () => {
+  it("connects to the sandbox's route under its environment id", () => {
     const registration = sandboxRegistration(entry());
     expect(registration?.target.environmentId).toBe("env-1");
     expect(registration?.profile.connectionId).toBe("sandbox:t-abc123");
-    expect(registration?.profile.httpBaseUrl).toBe("https://t-abc123.sandbox.example.com");
-    expect(registration?.profile.wsBaseUrl).toBe("wss://t-abc123.sandbox.example.com");
+    expect(registration?.profile.httpBaseUrl).toBe(
+      "https://control.example.workers.dev/s/t-abc123",
+    );
+    expect(registration?.profile.wsBaseUrl).toBe("wss://control.example.workers.dev/s/t-abc123/ws");
     expect(registration?.target.label).toBe("acme/demo · t-abc123");
   });
 

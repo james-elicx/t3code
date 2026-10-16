@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import * as NodeFS from "node:fs";
 
 import { describe, expect, it } from "vite-plus/test";
 
@@ -85,7 +85,7 @@ describe("decideGraphql", () => {
 
 describe("allowlist drift", () => {
   it("still matches the mutations T3's GitHub client sends", () => {
-    const source = readFileSync(
+    const source = NodeFS.readFileSync(
       new URL(
         "../../../../packages/source-control-github/src/server/GitHubPullRequestApi.ts",
         import.meta.url,

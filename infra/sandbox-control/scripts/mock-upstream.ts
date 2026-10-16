@@ -12,23 +12,27 @@
  * Every request is recorded with its headers. `GET /__recorded` returns them,
  * `DELETE /__recorded` clears them, and `GET /__refs` lists the bare repo's refs.
  */
-import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeHttp from "node:http";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 const port = Number(process.env.MOCK_PORT ?? 8790);
-const root = mkdtempSync(join(tmpdir(), "t3-sandbox-mock-"));
-const bare = join(root, "acme", "demo.git");
+const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-sandbox-mock-"));
+const bare = NodePath.join(root, "acme", "demo.git");
 
-const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
-mkdirSync(join(root, "acme"), { recursive: true });
+const git = (...args: string[]) =>
+  NodeChildProcess.execFileSync("git", args, { encoding: "utf8" }).trim();
+NodeFS.mkdirSync(NodePath.join(root, "acme"), { recursive: true });
 git("init", "--quiet", "--bare", "--initial-branch=main", bare);
 git("-C", bare, "config", "http.receivepack", "true");
-const seed = join(root, "seed");
+const seed = NodePath.join(root, "seed");
 git("init", "--quiet", "--initial-branch=main", seed);
-writeFileSync(join(seed, "README.md"), "# acme/demo\n\nSeeded by the sandbox mock upstream.\n");
+NodeFS.writeFileSync(
+  NodePath.join(seed, "README.md"),
+  "# acme/demo\n\nSeeded by the sandbox mock upstream.\n",
+);
 git("-C", seed, "add", "README.md");
 git(
   "-C",
@@ -57,13 +61,13 @@ interface Recorded {
 }
 let recorded: Recorded[] = [];
 
-const readBody = async (request: IncomingMessage) => {
+const readBody = async (request: NodeHttp.IncomingMessage) => {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(chunk as Buffer);
   return Buffer.concat(chunks);
 };
 
-const record = (request: IncomingMessage, body: Buffer) => {
+const record = (request: NodeHttp.IncomingMessage, body: Buffer) => {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {
     headers[name] = Array.isArray(value) ? value.join(", ") : (value ?? "");
@@ -90,7 +94,7 @@ const record = (request: IncomingMessage, body: Buffer) => {
   });
 };
 
-const json = (response: ServerResponse, status: number, value: unknown) => {
+const json = (response: NodeHttp.ServerResponse, status: number, value: unknown) => {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(value, null, 2));
 };
@@ -98,7 +102,7 @@ const json = (response: ServerResponse, status: number, value: unknown) => {
 const MOCK_REPLY = "Hello from the mock AI Gateway.";
 
 /** The Messages API surface the Claude CLI uses, behind AI Gateway's `/anthropic` prefix. */
-function anthropic(url: URL, body: Buffer, response: ServerResponse) {
+function anthropic(url: URL, body: Buffer, response: NodeHttp.ServerResponse) {
   const path = url.pathname.replace(/^\/gateway\/v1\/[^/]+\/[^/]+\/anthropic/, "");
   if (path === "/v1/messages/count_tokens") return json(response, 200, { input_tokens: 12 });
   if (path.startsWith("/v1/models")) {
@@ -169,13 +173,17 @@ function anthropic(url: URL, body: Buffer, response: ServerResponse) {
   response.end();
 }
 
-function gitHttpBackend(request: IncomingMessage, response: ServerResponse, body: Buffer) {
+function gitHttpBackend(
+  request: NodeHttp.IncomingMessage,
+  response: NodeHttp.ServerResponse,
+  body: Buffer,
+) {
   const url = new URL(request.url ?? "/", "http://mock");
   // github.com accepts `owner/repo` and `owner/repo.git`; the bare repo is `repo.git`.
   const pathInfo = url.pathname
     .slice("/github".length)
     .replace(/^\/([^/]+)\/([^/]+?)(?:\.git)?\//, "/$1/$2.git/");
-  const child = spawn("git", ["http-backend"], {
+  const child = NodeChildProcess.spawn("git", ["http-backend"], {
     env: {
       ...process.env,
       GIT_PROJECT_ROOT: root,
@@ -215,7 +223,7 @@ function gitHttpBackend(request: IncomingMessage, response: ServerResponse, body
   });
 }
 
-const server = createServer(async (request, response) => {
+const server = NodeHttp.createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://mock");
   if (url.pathname === "/__recorded") {
     if (request.method === "DELETE") recorded = [];

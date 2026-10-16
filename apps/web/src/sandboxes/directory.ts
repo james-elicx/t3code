@@ -16,7 +16,7 @@ import { randomUUID } from "../lib/utils";
 /**
  * Sandboxed threads: when this app is served by the sandbox control plane
  * (infra/sandbox-control), each thread runs in its own sandbox, a full T3
- * server at its own origin. The control plane lists them here; each becomes a
+ * server behind the control plane, which lists them here. Each becomes a
  * platform environment that the app connects to like any other.
  */
 

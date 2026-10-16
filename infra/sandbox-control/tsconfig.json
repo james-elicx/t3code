@@ -18,5 +18,12 @@
       }
     ]
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts", "e2e/**/*.ts", "playwright.config.ts"]
+  "include": [
+    "scripts/**/*.ts",
+    "src/**/*.ts",
+    "e2e/**/*.ts",
+    "playwright.config.ts",
+    "cloudflare.config.ts",
+    "wrangler.config.ts"
+  ]
 }

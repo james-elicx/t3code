@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import * as NodeFS from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -32,8 +32,8 @@ interface Sandbox {
 
 /** The gateway token the Worker should add, when the local placeholder secrets are in use. */
 const devVarsPath = new URL("../.dev.vars", import.meta.url);
-const gatewayToken = existsSync(devVarsPath)
-  ? /^AI_GATEWAY_TOKEN=(.*)$/m.exec(readFileSync(devVarsPath, "utf8"))?.[1]
+const gatewayToken = NodeFS.existsSync(devVarsPath)
+  ? /^AI_GATEWAY_TOKEN=(.*)$/m.exec(NodeFS.readFileSync(devVarsPath, "utf8"))?.[1]
   : undefined;
 
 test.describe.configure({ mode: "serial" });

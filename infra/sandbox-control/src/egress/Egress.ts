@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 
-import type { EgressProps, Env } from "../env.ts";
+import { controlPlane, type EgressProps, type Env } from "../env.ts";
 import { toAiGatewayRequest } from "./anthropic.ts";
 import { decideGraphql } from "./githubGraphql.ts";
 import {
@@ -55,7 +55,7 @@ export class Egress extends WorkerEntrypoint<Env, EgressProps> {
   }
 
   private async github(request: Request, url: URL) {
-    const sandbox = this.env.THREAD_SANDBOX.getByName(this.ctx.props.threadId);
+    const sandbox = controlPlane(this.ctx).ThreadSandbox.getByName(this.ctx.props.threadId);
     const session = await sandbox.session();
     if (!session) return blocked("This sandbox has no session.");
 

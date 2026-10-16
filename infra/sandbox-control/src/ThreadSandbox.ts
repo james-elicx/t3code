@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-import type { ControlPlaneExports, Env } from "./env.ts";
+import { controlPlane, type Env } from "./env.ts";
 import { directory } from "./SandboxDirectory.ts";
 import { sessionBranchPrefix, type RecordedPullRequest, type SandboxSession } from "./session.ts";
 import { bridgeWebSocket } from "./wsBridge.ts";
@@ -187,7 +187,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     const record = await this.record();
     await this.stop();
     await this.ctx.storage.deleteAll();
-    if (record) await directory(this.env).remove(record.threadId);
+    if (record) await directory(controlPlane(this.ctx)).remove(record.threadId);
   }
 
   /** Development only (gated by DEBUG_EXEC in the Worker): runs a command in the sandbox. */
@@ -217,6 +217,10 @@ export class ThreadSandbox extends DurableObject<Env> {
     }
     const url = new URL(request.url);
     const headers = new Headers(request.headers);
+    // The browser's Access session is for the control plane, never the agent.
+    for (const name of [...headers.keys()]) {
+      if (name === "cookie" || name.startsWith("cf-access-")) headers.delete(name);
+    }
     headers.set("authorization", `Bearer ${token}`);
     headers.set("x-forwarded-host", url.host);
     headers.set("x-forwarded-proto", url.protocol.replace(/:$/, ""));
@@ -232,7 +236,12 @@ export class ThreadSandbox extends DurableObject<Env> {
     touch();
     try {
       const response = await this.container.getTcpPort(T3_PORT).fetch(upstream);
-      return response.webSocket ? bridgeWebSocket(response.webSocket, touch) : response;
+      if (response.webSocket) return bridgeWebSocket(response.webSocket, touch);
+      // Every sandbox shares the control plane's origin, so none may set cookies on it.
+      if (!response.headers.has("set-cookie")) return response;
+      const proxied = new Response(response.body, response);
+      proxied.headers.delete("set-cookie");
+      return proxied;
     } catch (error) {
       return new Response(`The sandbox is not responding: ${String(error)}\n`, { status: 502 });
     }
@@ -293,7 +302,7 @@ export class ThreadSandbox extends DurableObject<Env> {
    * entrypoint, bound to this thread. With internet off, nothing else leaves.
    */
   private async interceptEgress(threadId: string) {
-    const egress = (this.ctx.exports as unknown as ControlPlaneExports).Egress({
+    const egress = controlPlane(this.ctx).Egress({
       props: { threadId },
     });
     await this.container.interceptOutboundHttps("*", egress);
@@ -399,7 +408,7 @@ export class ThreadSandbox extends DurableObject<Env> {
 
   private async save(record: SandboxRecord) {
     await this.ctx.storage.put("record", record);
-    await directory(this.env).upsert(this.summary(record));
+    await directory(controlPlane(this.ctx)).upsert(this.summary(record));
   }
 
   private summary(record: SandboxRecord): SandboxSummary {

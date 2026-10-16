@@ -1,5 +1,7 @@
-import type { Env } from "./env.ts";
+import { accessDenial } from "./access.ts";
+import { controlPlane, type ControlPlaneExports, type Env } from "./env.ts";
 import { directory } from "./SandboxDirectory.ts";
+import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
 import type { CreateSandboxInput, SandboxSummary } from "./ThreadSandbox.ts";
 
@@ -8,22 +10,28 @@ export { SandboxDirectory } from "./SandboxDirectory.ts";
 export { ThreadSandbox } from "./ThreadSandbox.ts";
 
 /**
- * The control plane. `<thread-id>.<SANDBOX_DOMAIN>` is proxied into that
- * thread's sandbox; the apex serves the sandbox API and the web client.
- * Cloudflare Access in front of the whole domain authenticates callers.
+ * The control plane, on one hostname. `/s/<thread-id>/…` is proxied into that
+ * thread's sandbox; `/api/sandboxes` is the sandbox API; everything else is the
+ * web client. Cloudflare Access in front authenticates every request, and the
+ * Worker verifies its token again (see access.ts).
  */
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const sandboxId = sandboxIdFromHost(url.hostname, env.SANDBOX_DOMAIN);
-    if (sandboxId) {
-      const sandbox = env.THREAD_SANDBOX.getByName(sandboxId);
-      if (!(await sandbox.describe())) return text(404, `No sandbox named ${sandboxId}.`);
-      return sandbox.fetch(request);
+    const exports = controlPlane(ctx);
+    const denial = await authorize(request, env, url);
+    if (denial) return text(403, denial);
+
+    const sandboxPath = parseSandboxPath(url.pathname);
+    if (sandboxPath) {
+      const sandbox = exports.ThreadSandbox.getByName(sandboxPath.id);
+      if (!(await sandbox.describe())) return text(404, `No sandbox named ${sandboxPath.id}.`);
+      url.pathname = sandboxPath.rest;
+      return sandbox.fetch(new Request(url, request));
     }
     if (url.pathname === "/api/sandboxes" || url.pathname.startsWith("/api/sandboxes/")) {
       try {
-        return await api(request, env, url);
+        return await api(request, env, exports, url);
       } catch (error) {
         return text(500, String(error));
       }
@@ -32,21 +40,31 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-export function sandboxIdFromHost(hostname: string, domain: string): string | null {
-  const suffix = `.${domain.toLowerCase()}`;
-  const host = hostname.toLowerCase();
-  if (!host.endsWith(suffix)) return null;
-  const label = host.slice(0, -suffix.length);
-  return SANDBOX_ID_PATTERN.test(label) ? label : null;
+/**
+ * Every request needs a valid Access token. Without Access configured, only
+ * loopback hosts are served, which is local development.
+ */
+async function authorize(request: Request, env: Env, url: URL): Promise<string | null> {
+  if (env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD) {
+    return accessDenial(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
+  }
+  return isLoopbackHost(url.hostname)
+    ? null
+    : "Cloudflare Access is not configured for this control plane.";
 }
 
-async function api(request: Request, env: Env, url: URL): Promise<Response> {
+async function api(
+  request: Request,
+  env: Env,
+  exports: ControlPlaneExports,
+  url: URL,
+): Promise<Response> {
   const [, , , id, action] = url.pathname.split("/");
   const method = request.method;
 
   if (id === undefined || id === "") {
     if (method === "GET") {
-      const sandboxes = await directory(env).list();
+      const sandboxes = await directory(exports).list();
       return Response.json({ sandboxes: sandboxes.map((summary) => withRoutes(summary, url)) });
     }
     if (method === "POST") {
@@ -55,7 +73,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         return text(400, "threadId must be a DNS label: lowercase letters, digits and hyphens.");
       }
       if (typeof input.repo !== "string") return text(400, "repo (owner/name) is required.");
-      const summary = await env.THREAD_SANDBOX.getByName(input.threadId).create({
+      const summary = await exports.ThreadSandbox.getByName(input.threadId).create({
         threadId: input.threadId,
         repo: input.repo,
         ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
@@ -67,7 +85,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (!SANDBOX_ID_PATTERN.test(id)) return text(400, "Invalid sandbox id.");
-  const sandbox = env.THREAD_SANDBOX.getByName(id);
+  const sandbox = exports.ThreadSandbox.getByName(id);
   const summary = await sandbox.describe();
   if (!summary) return text(404, `No sandbox named ${id}.`);
 
@@ -105,15 +123,16 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
 }
 
 /**
- * Where a client reaches the sandbox's T3 server. The client registers it as a
- * normal saved environment with a direct route; the proxy supplies the credential.
+ * Where a client reaches the sandbox's T3 server: below its path prefix on this
+ * origin. The client registers it as a saved environment with a direct route;
+ * the proxy supplies the credential.
  */
 function withRoutes(summary: SandboxSummary, url: URL) {
-  const http = `${url.protocol}//${summary.threadId}.${url.host}`;
+  const http = `${url.origin}/s/${summary.threadId}`;
   return {
     ...summary,
     httpBaseUrl: http,
-    wsBaseUrl: http.replace(/^http/, "ws"),
+    wsBaseUrl: `${http.replace(/^http/, "ws")}/ws`,
   };
 }
 

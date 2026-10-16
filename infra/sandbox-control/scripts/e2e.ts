@@ -6,17 +6,19 @@
  *
  *   CONTROL_PLANE=http://localhost:8787 MOCK=http://127.0.0.1:8790 node scripts/e2e.ts
  */
-import { readFileSync } from "node:fs";
+import * as NodeFS from "node:fs";
+import * as NodeHttp from "node:http";
 import WebSocket from "ws";
 
 const control = process.env.CONTROL_PLANE ?? "http://localhost:8787";
 const mock = process.env.MOCK ?? "http://127.0.0.1:8790";
 const threadId = process.env.THREAD_ID ?? `e2e-${Date.now().toString(36)}`;
 const branchPrefix = `t3/${threadId}/`;
-const sandboxOrigin = control.replace("://", `://${threadId}.`);
+/** The sandbox's T3 server, below its path prefix on the control plane. */
+const sandboxRoute = `${control}/s/${threadId}`;
 
 const secrets = Object.fromEntries(
-  readFileSync(new URL("../.dev.vars", import.meta.url), "utf8")
+  NodeFS.readFileSync(new URL("../.dev.vars", import.meta.url), "utf8")
     .split("\n")
     .filter((line) => line.includes("="))
     .map((line) => line.split("=", 2) as [string, string]),
@@ -86,9 +88,35 @@ async function main() {
 
   const listed = (await api("")).sandboxes as Array<{ threadId: string; httpBaseUrl: string }>;
   const entry = listed.find((sandbox) => sandbox.threadId === threadId);
-  check("directory lists it with its route", entry?.httpBaseUrl === sandboxOrigin, entry ?? listed);
+  check("directory lists it with its route", entry?.httpBaseUrl === sandboxRoute, entry ?? listed);
 
-  const viaProxy = (await (await fetch(`${sandboxOrigin}/api/auth/session`)).json()) as {
+  // Without Access configured the control plane serves loopback hosts only, so a
+  // deploy that forgot Access fails closed.
+  const elsewhere = await new Promise<string>((resolve, reject) => {
+    const target = new URL(`${control}/api/sandboxes`);
+    const req = NodeHttp.request(
+      {
+        host: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        headers: { host: "t3-sandbox-control.example.workers.dev" },
+      },
+      (response) => {
+        let body = "";
+        response.on("data", (chunk) => (body += chunk));
+        response.on("end", () => resolve(`${response.statusCode} ${body.trim()}`));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  check(
+    "without Access configured, a non-loopback host gets nothing",
+    elsewhere.startsWith("403 "),
+    elsewhere,
+  );
+
+  const viaProxy = (await (await fetch(`${sandboxRoute}/api/auth/session`)).json()) as {
     authenticated: boolean;
   };
   const direct = JSON.parse((await sh("curl -s http://127.0.0.1:3773/api/auth/session")).stdout);
@@ -100,7 +128,7 @@ async function main() {
 
   const pong = await new Promise<string>((resolve) => {
     const socket = new WebSocket(
-      `${sandboxOrigin.replace(/^http/, "ws")}/ws?orchestrationProtocol=2`,
+      `${sandboxRoute.replace(/^http/, "ws")}/ws?orchestrationProtocol=2`,
     );
     const timer = setTimeout(() => resolve("timeout"), 10_000);
     socket.on("open", () => socket.send(JSON.stringify({ _tag: "Ping" })));
@@ -301,7 +329,7 @@ async function main() {
       if (Date.now() - restoreStarted > 240_000) throw new Error("restore did not finish in 240s");
     } while (summary.status !== "running");
     const restored = await sh("cd /workspace/demo && git log -1 --format=%s");
-    const session = (await (await fetch(`${sandboxOrigin}/api/auth/session`)).json()) as {
+    const session = (await (await fetch(`${sandboxRoute}/api/auth/session`)).json()) as {
       authenticated: boolean;
     };
     check(

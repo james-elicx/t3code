@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-import type { Env } from "./env.ts";
+import type { ControlPlaneExports, Env } from "./env.ts";
 import type { SandboxSummary } from "./ThreadSandbox.ts";
 
 /**
@@ -24,4 +24,5 @@ export class SandboxDirectory extends DurableObject<Env> {
   }
 }
 
-export const directory = (env: Env) => env.SANDBOX_DIRECTORY.getByName("global");
+export const directory = (exports: ControlPlaneExports) =>
+  exports.SandboxDirectory.getByName("global");

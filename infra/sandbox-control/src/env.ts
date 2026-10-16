@@ -2,12 +2,15 @@ import type { SandboxDirectory } from "./SandboxDirectory.ts";
 import type { ThreadSandbox } from "./ThreadSandbox.ts";
 
 export interface Env {
-  readonly THREAD_SANDBOX: DurableObjectNamespace<ThreadSandbox>;
-  readonly SANDBOX_DIRECTORY: DurableObjectNamespace<SandboxDirectory>;
   readonly ASSETS: Fetcher;
 
-  /** Sandboxes are served at `<thread-id>.<SANDBOX_DOMAIN>`. */
-  readonly SANDBOX_DOMAIN: string;
+  /**
+   * Cloudflare Access: `https://<team>.cloudflareaccess.com` and the
+   * application's AUD tag. Unset only in local development, where the Worker
+   * serves loopback hosts alone.
+   */
+  readonly ACCESS_TEAM_DOMAIN?: string;
+  readonly ACCESS_AUD?: string;
   /** `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>`; a local mock in dev. */
   readonly AI_GATEWAY_BASE_URL: string;
   readonly AI_GATEWAY_TOKEN: string;
@@ -26,7 +29,16 @@ export interface EgressProps {
   readonly threadId: string;
 }
 
-/** `ctx.exports` is typed by `wrangler types`; this package declares just what it uses. */
+/**
+ * This Worker's own classes, through `ctx.exports` rather than bindings: a
+ * Container may only attach to a Durable Object that no binding names a
+ * `script_name` for, and `cf` writes one on every binding.
+ */
 export interface ControlPlaneExports {
+  readonly ThreadSandbox: DurableObjectNamespace<ThreadSandbox>;
+  readonly SandboxDirectory: DurableObjectNamespace<SandboxDirectory>;
   Egress(options: { props: EgressProps }): Fetcher;
 }
+
+export const controlPlane = (ctx: { readonly exports: unknown }) =>
+  ctx.exports as ControlPlaneExports;

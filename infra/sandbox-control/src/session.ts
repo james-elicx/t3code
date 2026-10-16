@@ -20,7 +20,7 @@ export interface RecordedPullRequest {
 
 export const sessionBranchPrefix = (threadId: string) => `t3/${threadId}/`;
 
-/** DNS-label-shaped ids, so a thread id is always a valid `<id>.<domain>` hostname. */
+/** DNS-label-shaped ids: one path segment, `/s/<id>`, and safe in branch names. */
 export const SANDBOX_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export const isSessionRepo = (session: SandboxSession, owner: string, name: string) =>
