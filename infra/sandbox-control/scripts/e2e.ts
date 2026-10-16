@@ -305,15 +305,15 @@ async function main() {
   );
 
   const egress = await sh(`
-    get() { code=$(curl -s -m 10 -o /tmp/body -w '%{http_code}' "$1"); echo "$code $(cat /tmp/body)"; }
+    get() { curl -s -m 20 -o /tmp/body -w '%{http_code}' "$1"; grep -o '<title>[^<]*' /tmp/body | head -1; }
     echo "https://example.com:              $(get https://example.com/)"
     echo "http://example.com:               $(get http://example.com/)"
     echo "raw TCP to github.com:22 banner:  [$( (sleep 4) | nc -w 5 140.82.112.3 22 2>/dev/null | head -c 20)]"
   `);
   check(
-    "everything else is blocked",
-    /https:\/\/example\.com: +403 Egress to example\.com is not allowed/.test(egress.stdout) &&
-      /http:\/\/example\.com: +403 Egress to example\.com is not allowed/.test(egress.stdout) &&
+    "other web traffic leaves through the egress proxy; raw TCP does not",
+    /https:\/\/example\.com: +200<title>Example Domain/.test(egress.stdout) &&
+      /http:\/\/example\.com: +200<title>Example Domain/.test(egress.stdout) &&
       /banner: +\[\]/.test(egress.stdout),
     egress.stdout,
   );

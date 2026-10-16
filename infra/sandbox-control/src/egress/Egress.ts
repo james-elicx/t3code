@@ -7,6 +7,7 @@ import {
   checkCreatePullRequest,
   checkUpdatePullRequest,
   decideGitHubRequest,
+  githubAuthorization,
   refusedRefUpdates,
   type Credential,
 } from "./githubPolicy.ts";
@@ -17,7 +18,9 @@ import { PktLineError, readReceivePackCommands, receivePackRejection } from "./p
  * Durable Object registers this entrypoint for `*` with the thread id in its
  * props, so the sandbox cannot choose which session it speaks for.
  *
- * Default deny: only Anthropic, GitHub, and the configured public hosts leave.
+ * Anthropic and GitHub get their credentials and policy here. Every other host
+ * is reached as the sandbox asked: the sandbox holds no secrets, so there is
+ * nothing to add or protect. Raw TCP stays off (`enableInternet: false`).
  */
 export class Egress extends WorkerEntrypoint<Env, EgressProps> {
   override async fetch(request: Request): Promise<Response> {
@@ -30,8 +33,7 @@ export class Egress extends WorkerEntrypoint<Env, EgressProps> {
         case "api.github.com":
           return await this.github(request, url);
       }
-      if (publicHosts(this.env).has(url.hostname)) return await this.anonymous(request);
-      return blocked(`Egress to ${url.hostname} is not allowed from a T3 sandbox.`);
+      return await fetch(request);
     } catch (error) {
       console.error("egress failed", url.hostname, error);
       return new Response("The sandbox egress proxy failed.", { status: 502 });
@@ -45,13 +47,6 @@ export class Egress extends WorkerEntrypoint<Env, EgressProps> {
     });
     if (!upstream) return blocked("Only the Anthropic /v1 API is reachable from a sandbox.");
     return fetch(upstream);
-  }
-
-  private anonymous(request: Request) {
-    const headers = new Headers(request.headers);
-    headers.delete("authorization");
-    headers.delete("cookie");
-    return fetch(new Request(request, { headers }));
   }
 
   private async github(request: Request, url: URL) {
@@ -143,21 +138,12 @@ function applyCredential(headers: Headers, host: string, credential: Credential,
   headers.delete("cookie");
   headers.delete("host");
   if (credential === "none") return;
-  const token = credential === "write" ? env.GITHUB_WRITE_PAT : env.GITHUB_READ_PAT;
-  // git uses Basic auth over smart HTTP; the REST and GraphQL APIs take a bearer token.
-  headers.set(
-    "authorization",
-    host === "github.com" ? `Basic ${btoa(`x-access-token:${token}`)}` : `Bearer ${token}`,
+  const authorization = githubAuthorization(
+    host,
+    credential === "write" ? env.GITHUB_WRITE_PAT : env.GITHUB_READ_PAT,
   );
+  if (authorization) headers.set("authorization", authorization);
 }
-
-const publicHosts = (env: Env) =>
-  new Set(
-    (env.PUBLIC_EGRESS_HOSTS ?? "")
-      .split(",")
-      .map((host) => host.trim())
-      .filter(Boolean),
-  );
 
 function parseJson(text: string): unknown {
   try {

@@ -20,7 +20,7 @@ entrypoint applies policy and adds the real credential outside the sandbox.
 | Sandbox API               | `src/worker.ts`                                         | `GET/POST /api/sandboxes`, `GET/DELETE /api/sandboxes/:id`, `POST …/:id/stop\|snapshot\|restore`                                                                                                               |
 | One DO per sandbox        | `src/ThreadSandbox.ts`                                  | Owns the session record and the container. Boots the T3 server and issues it a bearer token. Proxies `/s/<thread-id>/…` HTTP and WebSocket with that token added                                               |
 | Directory                 | `src/SandboxDirectory.ts`                               | Summaries pushed by each sandbox, so clients list idle sandboxes without waking them                                                                                                                           |
-| Egress                    | `src/egress/Egress.ts`                                  | The only way out of a sandbox. Anything not handled below gets a 403                                                                                                                                           |
+| Egress                    | `src/egress/Egress.ts`                                  | The only way out of a sandbox. Anthropic and GitHub get the handling below; any other host is fetched as asked, since the sandbox holds nothing to protect. Raw TCP is off                                     |
 | &nbsp;&nbsp;Anthropic     | `src/egress/anthropic.ts`                               | `api.anthropic.com/v1/*` is rewritten to `gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic/v1/*` with `cf-aig-authorization`. `x-api-key` is dropped. `ANTHROPIC_BASE_URL` is not set in the sandbox |
 | &nbsp;&nbsp;GitHub        | `src/egress/githubPolicy.ts`, `githubGraphql.ts`        | Read PAT for fetches and reads; write PAT only for allowed writes. Rules below                                                                                                                                 |
 | &nbsp;&nbsp;git push gate | `src/egress/pktLine.ts`                                 | Parses the receive-pack command list before anything reaches GitHub. A refused push gets a status report, so git prints `! [remote rejected] <ref> (<reason>)`                                                 |
@@ -112,7 +112,8 @@ Worker lets through gets admin on every sandbox, because the proxy adds each san
 for them.
 
 1. **AI Gateway and GitHub.** Create a gateway with an Anthropic key stored in it (BYOK). Create a
-   read PAT with read access to the repos you will test with, and a write PAT for pushes and PRs.
+   write PAT for pushes and PRs. A read PAT is optional: without one, the session repository is
+   fetched anonymously, so only public repos work.
 2. **The web build for the workers.dev origin:**
    `SANDBOX_APP_URL=https://t3-sandbox-control.<subdomain>.workers.dev vp run build:web`.
 3. **Deploy.** Put `AI_GATEWAY_TOKEN`, `GITHUB_WRITE_PAT` and `GITHUB_READ_PAT` in a secrets file
@@ -123,8 +124,7 @@ for them.
      vp run deploy:test --secrets-file <file>
    ```
 
-   `SANDBOX_PUBLIC_EGRESS_HOSTS` optionally lists more hosts sandboxes may reach without a
-   credential. `DEBUG_EXEC` is off.
+   Leave `GITHUB_READ_PAT` empty to go without one. `DEBUG_EXEC` is off.
 
 4. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
    `t3-sandbox-control.<subdomain>.workers.dev`, with an Allow policy for the people who should

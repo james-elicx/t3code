@@ -5,6 +5,7 @@ import {
   checkCreatePullRequest,
   checkUpdatePullRequest,
   decideGitHubRequest,
+  githubAuthorization,
   refusedRefUpdates,
 } from "./githubPolicy.ts";
 
@@ -158,5 +159,17 @@ describe("REST API", () => {
     expect(decide("PUT", "https://api.github.com/repos/acme/demo/pulls/7/merge")).toMatchObject({
       reason: expect.stringMatching(/Merging/),
     });
+  });
+});
+
+describe("githubAuthorization", () => {
+  it("uses Basic auth for git and a bearer token for the API", () => {
+    expect(githubAuthorization("github.com", "pat")).toBe(`Basic ${btoa("x-access-token:pat")}`);
+    expect(githubAuthorization("api.github.com", "pat")).toBe("Bearer pat");
+  });
+
+  it("goes anonymous without a PAT, so public repositories still clone", () => {
+    expect(githubAuthorization("github.com", undefined)).toBeNull();
+    expect(githubAuthorization("github.com", "")).toBeNull();
   });
 });

@@ -30,7 +30,6 @@ function deployedVars() {
     AI_GATEWAY_BASE_URL: `https://gateway.ai.cloudflare.com/v1/${accountId}/${required("SANDBOX_AI_GATEWAY")}`,
     GITHUB_ORIGIN: "https://github.com",
     GITHUB_API_ORIGIN: "https://api.github.com",
-    PUBLIC_EGRESS_HOSTS: process.env.SANDBOX_PUBLIC_EGRESS_HOSTS?.trim() ?? "",
     DEBUG_EXEC: "0",
     // Until both are set, the Worker refuses every request: it serves loopback hosts only.
     ACCESS_TEAM_DOMAIN: process.env.SANDBOX_ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "") ?? "",
@@ -42,7 +41,6 @@ const localVars = {
   AI_GATEWAY_BASE_URL: `${MOCK}/gateway/v1/poc-account/poc-gateway`,
   GITHUB_ORIGIN: `${MOCK}/github`,
   GITHUB_API_ORIGIN: `${MOCK}/github-api`,
-  PUBLIC_EGRESS_HOSTS: "",
   DEBUG_EXEC: "1",
   ACCESS_TEAM_DOMAIN: "",
   ACCESS_AUD: "",

@@ -159,3 +159,14 @@ export function checkUpdatePullRequest(body: unknown): string | null {
   if ("base" in body) return "Changing a pull request's base is not allowed from a sandbox.";
   return null;
 }
+
+/**
+ * The `Authorization` header a GitHub request is forwarded with, or null to send
+ * it anonymously. An unset PAT means anonymous: public repositories still clone
+ * without a read PAT, where a bad credential would get a 401.
+ */
+export function githubAuthorization(host: string, token: string | undefined): string | null {
+  if (!token) return null;
+  // git uses Basic auth over smart HTTP; the REST and GraphQL APIs take a bearer token.
+  return host === "github.com" ? `Basic ${btoa(`x-access-token:${token}`)}` : `Bearer ${token}`;
+}

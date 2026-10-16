@@ -15,12 +15,11 @@ export interface Env {
   readonly AI_GATEWAY_BASE_URL: string;
   readonly AI_GATEWAY_TOKEN: string;
   readonly GITHUB_WRITE_PAT: string;
-  readonly GITHUB_READ_PAT: string;
+  /** Optional: without it, the session repository is fetched anonymously, so it must be public. */
+  readonly GITHUB_READ_PAT?: string;
   /** Upstreams for github.com and api.github.com; overridden by a local mock in dev. */
   readonly GITHUB_ORIGIN: string;
   readonly GITHUB_API_ORIGIN: string;
-  /** Comma-separated hosts a sandbox may reach anonymously, e.g. `registry.npmjs.org`. */
-  readonly PUBLIC_EGRESS_HOSTS: string;
   /** `"1"` enables `POST /api/sandboxes/:id/exec`, which local proofs use. Never in production. */
   readonly DEBUG_EXEC: string;
 }
