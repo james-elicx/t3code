@@ -50,6 +50,7 @@ import {
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
+import { isSandboxMode, sandboxRegistrations } from "../sandboxes/directory";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
@@ -569,7 +570,8 @@ const layerPlatformConnectionSource = Layer.effect(
   Effect.gen(function* () {
     if (isHostedStaticApp() || isLocalEnvironmentDisabled()) {
       return PlatformConnectionSource.PlatformConnectionSource.of({
-        registrations: Stream.empty,
+        // The sandbox control plane's hosted client lists one environment per sandbox.
+        registrations: isSandboxMode() ? sandboxRegistrations : Stream.empty,
       });
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());

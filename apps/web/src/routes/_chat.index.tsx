@@ -5,6 +5,8 @@ import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
+import { isSandboxMode } from "../sandboxes/directory";
+import { SandboxLauncherPage } from "../sandboxes/SandboxLauncher";
 import { isElectron } from "../env";
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
@@ -28,6 +30,9 @@ function ChatIndexRouteView() {
   const { environments, isReady } = useEnvironments();
 
   if (authGateState.status === "hosted-static") {
+    // Each sandbox holds one thread, so the landing starts a new sandbox rather
+    // than opening a draft in the latest project.
+    if (isSandboxMode()) return <SandboxLauncherPage />;
     if (!isReady) return null;
     if (environments.length === 0) return <HostedStaticOnboardingState />;
   }
