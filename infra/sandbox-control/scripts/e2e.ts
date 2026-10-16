@@ -53,6 +53,8 @@ interface Recorded {
   path: string;
   headers: Record<string, string>;
   body: string;
+  model?: string;
+  stream?: boolean;
 }
 const recorded = async (): Promise<Recorded[]> => (await fetch(`${mock}/__recorded`)).json();
 const refs = async (): Promise<Record<string, string>> => (await fetch(`${mock}/__refs`)).json();
@@ -151,15 +153,50 @@ async function main() {
     },
   );
 
+  // --- The thread: its checkout and Claude --------------------------------
+  const checkout = await sh(
+    "cd /workspace/demo && git rev-parse --abbrev-ref HEAD && " +
+      'node -p \'JSON.parse(require("fs").readFileSync("/t3home/userdata/settings.json")).defaultModelSelection.model\'',
+  );
+  check(
+    "the sandbox boots on its session branch with Claude Opus 5.5 as the default",
+    checkout.stdout.trim() === `${branchPrefix}work\nclaude-opus-5-5`,
+    checkout.stdout + checkout.stderr,
+  );
+
+  await fetch(`${mock}/__recorded`, { method: "DELETE" });
+  const cli = await sh(`cd /workspace/demo && claude -p "Say hello." 2>&1`);
+  const cliCall = (await recorded()).find((request) =>
+    /\/anthropic\/v1\/messages(\?|$)/.test(request.path),
+  );
+  check(
+    "Claude Code's own request streams through AI Gateway with the credential added outside",
+    cli.stdout.includes("Hello from the mock AI Gateway.") &&
+      cliCall?.stream === true &&
+      cliCall.headers["cf-aig-authorization"] === `Bearer ${secrets.AI_GATEWAY_TOKEN}` &&
+      cliCall.headers["x-api-key"] === undefined,
+    {
+      claudeSaid: cli.stdout.trim(),
+      upstream: `${cliCall?.method} ${cliCall?.path}`,
+      model: cliCall?.model,
+      stream: cliCall?.stream,
+      "x-api-key": cliCall?.headers["x-api-key"] ?? "(absent)",
+    },
+  );
+
   // --- Git ----------------------------------------------------------------
   await fetch(`${mock}/__recorded`, { method: "DELETE" });
   const mainBefore = (await refs())["refs/heads/main"];
   const push = await sh(
-    `set -e; git clone -q https://github.com/acme/demo.git /workspace/demo; cd /workspace/demo; ` +
+    `set -e; cd /workspace/demo; git fetch -q origin; ` +
       `echo "${threadId}" >> README.md; git commit -qam "change from ${threadId}"; ` +
       `git push origin HEAD:refs/heads/${branchPrefix}work 2>&1`,
   );
-  check("clone and push to the session branch", push.exitCode === 0, push.stdout + push.stderr);
+  check(
+    "push the boot checkout to the session branch",
+    push.exitCode === 0,
+    push.stdout + push.stderr,
+  );
 
   const afterAllowed = (await recorded()).length;
   const pushMain = await sh("cd /workspace/demo && git push origin HEAD:refs/heads/main 2>&1");
