@@ -36,6 +36,7 @@ import { useNewThreadHandler } from "./useHandleNewThread";
 import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsState";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
+import { deleteSandbox, readSandboxForEnvironment } from "../sandboxes/directory";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
   readEnvironmentSupportsPinning,
@@ -439,6 +440,29 @@ export function useThreadActions() {
 
   const deleteThread = useCallback(
     async (target: ScopedThreadRef, opts: { deletedThreadKeys?: ReadonlySet<string> } = {}) => {
+      // A sandbox holds one thread, so deleting the thread deletes its sandbox,
+      // asleep or not. Its environment leaves with the directory's next read.
+      const sandbox = readSandboxForEnvironment(target.environmentId);
+      if (sandbox !== null) {
+        const deleted = await settlePromise(() => deleteSandbox(sandbox.threadId));
+        if (deleted._tag === "Failure") return deleted;
+        const projectId = readThreadShell(target)?.projectId;
+        releaseComposerDraftUploads(target);
+        clearComposerDraftForThread(target);
+        if (projectId) {
+          clearProjectDraftThreadById(scopeProjectRef(target.environmentId, projectId), target);
+        }
+        clearTerminalUiState(target);
+        clearThreadPreviewState(target);
+        const currentRouteThreadRef = getCurrentRouteThreadRef();
+        if (
+          currentRouteThreadRef?.threadId === target.threadId &&
+          currentRouteThreadRef.environmentId === target.environmentId
+        ) {
+          await navigateAfterThreadDeletion(() => router.navigate({ to: "/", replace: true }));
+        }
+        return deleted;
+      }
       const permissionFailure = threadOperationFailure(target);
       if (permissionFailure) return permissionFailure;
       const resolved = resolveThreadTarget(target);

@@ -171,6 +171,8 @@ import { assistantCitationFromLocation } from "../lib/assistantCitationNavigatio
 import { isMacPlatform } from "../lib/utils";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
+import { useSandboxEnvironmentIds } from "../sandboxes/directory";
+import { useSandboxComposer } from "../sandboxes/useSandboxComposer";
 import {
   isAtomCommandInterrupted,
   mapAtomCommandResult,
@@ -2488,6 +2490,12 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread?.environmentId, activeThread?.projectId],
   );
   const activeProject = useProject(activeProjectRef);
+  const sandboxComposer = useSandboxComposer({
+    draftId: isLocalDraftThread ? (draftId ?? null) : null,
+    projectRef: isLocalDraftThread ? activeProjectRef : null,
+    environmentId: activeThread?.environmentId ?? null,
+  });
+  const sandboxEnvironmentIds = useSandboxEnvironmentIds();
   // Environment settings with the active project's overrides applied.
   const activeProjectSettings = useMemo(
     () => resolveProjectSettings(settings, activeProject?.id ?? null, activeProject ?? undefined),
@@ -2796,6 +2804,12 @@ export default function ChatView(props: ChatViewProps) {
       const seen = new Set<string>();
       for (const p of allProjects) {
         if (seen.has(p.environmentId)) continue;
+        // A sandbox holds one thread: the toggle starts new ones, never "Run on".
+        if (
+          p.environmentId !== activeProject.environmentId &&
+          sandboxEnvironmentIds.includes(p.environmentId)
+        )
+          continue;
         if (deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) !== logicalKey)
           continue;
         seen.add(p.environmentId);
@@ -2817,6 +2831,7 @@ export default function ChatView(props: ChatViewProps) {
     projectGroupingSettings,
     primaryEnvironmentId,
     environmentById,
+    sandboxEnvironmentIds,
     scratchWorkspaceRootFor,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
@@ -3117,7 +3132,9 @@ export default function ChatView(props: ChatViewProps) {
     // restarts) and the update banner already shows progress. Hard failure
     // phases still surface so the Reconnect action stays reachable.
     const suppressUnavailableBanner =
-      environmentReconnecting && (updateRunning || !reconnectWarningGraceElapsed);
+      (environmentReconnecting && (updateRunning || !reconnectWarningGraceElapsed)) ||
+      // An asleep sandbox is unreachable by design; its waking banner says so.
+      sandboxComposer.waking;
     if (activeEnvironmentUnavailableState && unavailableConnection && !suppressUnavailableBanner) {
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
@@ -3225,10 +3242,13 @@ export default function ChatView(props: ChatViewProps) {
       });
     }
     if (autoBalanceUpdateBanner) items.push(autoBalanceUpdateBanner);
+    if (sandboxComposer.banner) items.push(sandboxComposer.banner);
     return items;
   }, [
     automaticEnvironment,
     autoBalanceUpdateBanner,
+    sandboxComposer.banner,
+    sandboxComposer.waking,
     activeEnvironmentUnavailableState,
     handleReconnectActiveEnvironment,
     canDisconnectActiveEnvironment,
@@ -8877,6 +8897,14 @@ export default function ChatView(props: ChatViewProps) {
       notifyDirectAnnotationAttached();
       return;
     }
+    // With the sandbox toggle on, the first message waits for a new sandbox and
+    // is sent again once the draft has moved into it.
+    if (
+      (promptRef.current.trim().length > 0 || composerHasNonPromptContent || directAnnotation) &&
+      sandboxComposer.interceptSend(composerHasNonPromptContent || directAnnotation !== undefined)
+    ) {
+      return;
+    }
     if (needsLoadBalancing) {
       toastManager.add({
         type: "warning",
@@ -11037,6 +11065,22 @@ export default function ChatView(props: ChatViewProps) {
     setDraftThreadContext,
     workLocallyResendReady,
   ]);
+
+  // The draft has moved into its new sandbox: send the message it was holding,
+  // once that sandbox's environment can take it.
+  const sandboxResendReady =
+    sandboxComposer.resendReady &&
+    isLocalDraftThread &&
+    serverConfig !== null &&
+    !isSendBusy &&
+    !isConnecting &&
+    !threadDetailLoading &&
+    clientSettingsHydrated &&
+    !activeEnvironmentUnavailable;
+  useEffect(() => {
+    if (!sandboxResendReady || sendInFlightRef.current) return;
+    void onSendRef.current();
+  }, [sandboxResendReady]);
 
   const onStartFromOriginChange = (nextStartFromOrigin: boolean) => {
     if (canOverrideServerThreadEnvMode && activeThread) {

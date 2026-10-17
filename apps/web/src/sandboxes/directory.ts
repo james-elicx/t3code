@@ -9,6 +9,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 import { isHostedStaticApp } from "../hostedPairing";
 import { randomUUID } from "../lib/utils";
@@ -20,13 +21,26 @@ import { randomUUID } from "../lib/utils";
  * platform environment that the app connects to like any other.
  */
 
+/**
+ * `starting` covers the container booting, the clone and T3 starting;
+ * `restoring` is its T3 home coming back; `saving` precedes `asleep`.
+ */
+export type SandboxStatus = "asleep" | "starting" | "restoring" | "saving" | "running";
+
+/** Sizes a sandbox may ask for. One today; the toggle lists each. */
+export const SANDBOX_INSTANCES = ["standard-1"] as const;
+export type SandboxInstance = (typeof SANDBOX_INSTANCES)[number];
+
 /** A sandbox as the control plane's directory lists it. */
 export interface SandboxEntry {
   readonly threadId: string;
   readonly title: string;
-  readonly status: "stopped" | "starting" | "running";
+  readonly status: SandboxStatus;
   /** `owner/name` on GitHub. */
   readonly repo: string;
+  /** The project the control plane creates in the sandbox for its repo. */
+  readonly projectId: string;
+  readonly instance: SandboxInstance;
   readonly environmentId: string | null;
   readonly lastError: string | null;
   readonly httpBaseUrl: string;
@@ -91,6 +105,15 @@ export function findSandboxForEnvironment(
   return entries.find((entry) => entry.environmentId === environmentId) ?? null;
 }
 
+/** The environments that are sandboxes; re-renders only when that set changes. */
+export function useSandboxEnvironmentIds(): ReadonlyArray<string> {
+  return useSandboxDirectoryStore(
+    useShallow((state) =>
+      state.entries.flatMap((entry) => (entry.environmentId ? [entry.environmentId] : [])),
+    ),
+  );
+}
+
 export function readSandboxForEnvironment(environmentId: EnvironmentId): SandboxEntry | null {
   return findSandboxForEnvironment(useSandboxDirectoryStore.getState().entries, environmentId);
 }
@@ -116,8 +139,18 @@ export async function listSandboxes(): Promise<ReadonlyArray<SandboxEntry>> {
 
 export const getSandbox = (id: string) => request<SandboxEntry>(`/${id}`);
 
-export const createSandbox = (input: { threadId: string; repo: string; title: string }) =>
-  request<SandboxEntry>("", { method: "POST", body: JSON.stringify(input) });
+export const createSandbox = (input: {
+  threadId: string;
+  repo: string;
+  title: string;
+  instance?: SandboxInstance;
+}) => request<SandboxEntry>("", { method: "POST", body: JSON.stringify(input) });
+
+/**
+ * Marks the sandbox as viewed, booting it if it was asleep. An open thread
+ * calls it every minute; a sandbox nobody views sleeps once its work is done.
+ */
+export const wakeSandbox = (id: string) => request<SandboxEntry>(`/${id}/wake`, { method: "POST" });
 
 export async function deleteSandbox(id: string): Promise<void> {
   await request<null>(`/${id}`, { method: "DELETE" });

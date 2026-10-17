@@ -78,7 +78,6 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
-  Trash2Icon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
@@ -235,13 +234,7 @@ import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { requestConfirmDialog } from "../confirmDialog";
-import {
-  deleteSandbox,
-  findSandboxForEnvironment,
-  isSandboxMode,
-  useSandboxDirectoryStore,
-} from "../sandboxes/directory";
+import { isSandboxMode } from "../sandboxes/directory";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
@@ -1061,7 +1054,6 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const activeThreadId = activeThread?.id;
-  const sandboxEntries = useSandboxDirectoryStore((state) => state.entries);
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
       ?.serverConfig?.threadFind === true;
@@ -1869,46 +1861,14 @@ function OpenCommandPaletteDialog(props: {
   if (isSandboxMode()) {
     actionItems.push({
       kind: "action",
-      value: "action:new-sandbox-thread",
-      searchTerms: ["new thread", "sandbox", "repository", "repo"],
-      title: "New sandbox thread",
+      value: "action:sandbox-from-repo",
+      searchTerms: ["new thread", "sandbox", "repository", "repo", "github"],
+      title: "Start from a GitHub repo…",
       icon: <BoxIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({ to: "/sandbox", search: {} });
       },
     });
-    const currentSandbox =
-      currentProjectEnvironmentId === null
-        ? null
-        : findSandboxForEnvironment(sandboxEntries, currentProjectEnvironmentId);
-    if (currentSandbox !== null) {
-      actionItems.push({
-        kind: "action",
-        value: "action:delete-sandbox",
-        searchTerms: ["delete", "remove", "sandbox", "destroy"],
-        title: "Delete this thread's sandbox",
-        icon: <Trash2Icon className={ITEM_ICON_CLASS} />,
-        run: async () => {
-          const confirmed = await requestConfirmDialog(
-            `Delete the sandbox ${currentSandbox.threadId}?\nIts thread, checkout, and anything not pushed are lost.`,
-            { variant: "destructive" },
-          );
-          if (confirmed !== true) return;
-          try {
-            await deleteSandbox(currentSandbox.threadId);
-            await navigate({ to: "/" });
-          } catch (error) {
-            toastManager.add(
-              stackedThreadToast({
-                type: "error",
-                title: "Couldn't delete the sandbox",
-                description: error instanceof Error ? error.message : String(error),
-              }),
-            );
-          }
-        },
-      });
-    }
   }
 
   if (activeThreadId && supportsThreadFind) {

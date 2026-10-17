@@ -37,7 +37,6 @@ import {
   resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { readT3ProjectFile } from "../lib/t3ProjectFileDefaults";
-import { newSandboxId, readSandboxForEnvironment } from "../sandboxes/directory";
 import { environmentServerConfigsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -85,15 +84,6 @@ export function useNewThreadHandler() {
       // prepared checkout, a task to write — addresses that one rather than looking the project
       // up again and finding whichever draft it happens to hold.
     ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
-      // A sandbox holds one thread, so a new thread in its project is a new sandbox.
-      const sandbox = readSandboxForEnvironment(projectRef.environmentId);
-      if (sandbox !== null) {
-        void router.navigate({
-          to: "/sandbox",
-          search: { repo: sandbox.repo, launch: newSandboxId() },
-        });
-        return Promise.resolve(null);
-      }
       const projects = readProjects();
       const targetServerSettings =
         environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;

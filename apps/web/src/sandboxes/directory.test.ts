@@ -14,6 +14,8 @@ const entry = (overrides: Partial<SandboxEntry> = {}): SandboxEntry => ({
   title: "acme/demo",
   status: "running",
   repo: "acme/demo",
+  projectId: "sandbox:acme/demo",
+  instance: "standard-1",
   environmentId: "env-1",
   lastError: null,
   httpBaseUrl: "https://control.example.workers.dev/s/t-abc123",
@@ -41,8 +43,8 @@ describe("sandboxRegistration", () => {
     expect(sandboxRegistration(entry({ environmentId: null, status: "starting" }))).toBeNull();
   });
 
-  it("keeps a stopped sandbox, which wakes when the app connects", () => {
-    expect(sandboxRegistration(entry({ status: "stopped" }))).not.toBeNull();
+  it("keeps an asleep sandbox, so its threads stay listed from the cache", () => {
+    expect(sandboxRegistration(entry({ status: "asleep" }))).not.toBeNull();
   });
 });
 

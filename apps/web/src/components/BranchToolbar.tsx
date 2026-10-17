@@ -70,6 +70,7 @@ import { measureRestingComposerControls } from "./chat/restingComposerControlsMe
 import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
+import { SandboxToggleControl } from "../sandboxes/SandboxToggleControl";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
@@ -766,6 +767,9 @@ export const BranchToolbar = memo(function BranchToolbar({
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}
     >
+      {draftId && serverThread === null && activeProjectRef ? (
+        <SandboxToggleControl draftId={draftId} projectRef={activeProjectRef} />
+      ) : null}
       {showGitControls ? (
         <div className="contents @3xl/composer-surface:hidden">
           <RunContextSelector
