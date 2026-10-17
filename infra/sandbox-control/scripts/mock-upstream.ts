@@ -5,7 +5,8 @@
  *
  *   /gateway/...     Cloudflare AI Gateway: answers like the Messages API,
  *                    streaming when asked, as the Claude CLI does.
- *   /github-api/...  api.github.com: creating a pull request returns #7.
+ *   /github-api/...  api.github.com: a repository exists when it is served below;
+ *                    creating a pull request returns #7.
  *   /github/...      github.com git smart HTTP, served by `git http-backend`
  *                    over a seeded bare repository `acme/demo`.
  *
@@ -286,6 +287,14 @@ const server = NodeHttp.createServer(async (request, response) => {
         head: { ref: input.head },
         base: { ref: input.base },
       });
+    }
+    // A repository exists when the mock serves its git remote.
+    const repository = /^\/repos\/([^/]+)\/([^/]+)$/.exec(path);
+    if (request.method === "GET" && repository) {
+      const exists = NodeFS.existsSync(NodePath.join(root, repository[1]!, `${repository[2]}.git`));
+      return exists
+        ? json(response, 200, { full_name: `${repository[1]}/${repository[2]}`, private: true })
+        : json(response, 404, { message: "Not Found" });
     }
     return json(response, 200, { ok: true, method: request.method, path });
   }

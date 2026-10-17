@@ -2,7 +2,7 @@ import {
   EnvironmentId,
   OrchestrationV2ShellSnapshot,
   OrchestrationV2ShellSnapshotJson,
-  type ServerConfig,
+  ServerConfig,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
@@ -115,6 +115,11 @@ export function borrowedServerConfig(config: ServerConfig, environmentId: string
     environment: { ...config.environment, environmentId: EnvironmentId.make(environmentId) },
   };
 }
+
+const ServerConfigJson = Schema.fromJsonString(ServerConfig);
+/** A server config as the control plane keeps it for other clients to borrow. */
+export const encodeSharedServerConfig = Schema.encodeEffect(ServerConfigJson);
+export const decodeSharedServerConfig = Schema.decodeUnknownEffect(ServerConfigJson);
 
 /** Changes whenever the seeded shell would, so it is written only then. */
 export function seedSignature(entry: SandboxEntry, project: SandboxProjectEntry | null): string {

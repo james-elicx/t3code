@@ -3,6 +3,7 @@ import { controlPlane, type ControlPlaneExports, type Env } from "./env.ts";
 import { directory } from "./SandboxDirectory.ts";
 import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
+import { githubAuthorization } from "./egress/githubPolicy.ts";
 import { parseLaunch, parseRepo } from "./projects.ts";
 import {
   SANDBOX_INSTANCES,
@@ -74,11 +75,13 @@ async function api(
   const [, , , id, action, extra] = url.pathname.split("/");
   const method = request.method;
 
-  if (id === "projects") return projectsApi(request, exports, action, extra);
+  if (id === "projects") return projectsApi(request, env, exports, action, extra);
+  if (id === "server-config") return serverConfigApi(request, exports);
 
   if (id === undefined || id === "") {
     if (method === "GET") {
       const plane = directory(exports);
+      await plane.ensureSlots();
       const [sandboxes, projects] = await Promise.all([plane.list(), plane.projects()]);
       return Response.json({
         sandboxes: sandboxes.map((summary) => withRoutes(summary, url)),
@@ -152,9 +155,56 @@ async function api(
   return text(404, "Not found.");
 }
 
+const SERVER_CONFIG_MAX_BYTES = 1024 * 1024;
+
+/** The server config clients borrow for a sandbox that has not started (see SandboxDirectory). */
+async function serverConfigApi(request: Request, exports: ControlPlaneExports): Promise<Response> {
+  const plane = directory(exports);
+  if (request.method === "GET") {
+    const config = await plane.serverConfig();
+    return config === null
+      ? text(404, "No sandbox has run yet.")
+      : new Response(config, { headers: { "content-type": "application/json" } });
+  }
+  if (request.method === "PUT") {
+    const body = await request.text();
+    if (body.length > SERVER_CONFIG_MAX_BYTES) return text(413, "The server config is too large.");
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      // Not JSON: refused below.
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return text(400, "The server config must be a JSON object.");
+    }
+    await plane.setServerConfig(body);
+    return new Response(null, { status: 204 });
+  }
+  return text(405, "Use GET or PUT.");
+}
+
+/** Why the control plane's read token can't use the repository, or null when it can. */
+async function unreadableRepository(env: Env, repo: string): Promise<string | null> {
+  const authorization = githubAuthorization("api.github.com", env.GITHUB_READ_PAT);
+  const response = await fetch(`${env.GITHUB_API_ORIGIN}/repos/${repo}`, {
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": "t3-sandbox-control",
+      ...(authorization ? { authorization } : {}),
+    },
+  });
+  await response.body?.cancel();
+  if (response.ok) return null;
+  return response.status === 404
+    ? `No GitHub repository ${repo} that the control plane's token can read.`
+    : `GitHub answered HTTP ${response.status} for ${repo}.`;
+}
+
 /** Projects: a GitHub repository each, with an unstarted sandbox ready for its next thread. */
 async function projectsApi(
   request: Request,
+  env: Env,
   exports: ControlPlaneExports,
   owner: string | undefined,
   name: string | undefined,
@@ -170,6 +220,9 @@ async function projectsApi(
       } catch (error) {
         return text(400, String(error instanceof Error ? error.message : error));
       }
+      // A sandbox would only fail its clone; say so before there is a thread.
+      const unreadable = await unreadableRepository(env, repo);
+      if (unreadable) return text(400, unreadable);
       await plane.addProject(repo);
       return Response.json(await plane.project(repo), { status: 201 });
     }

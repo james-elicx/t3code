@@ -101,7 +101,7 @@ it in `SandboxDirectory` as the template. Sandboxes that already exist keep thei
 Before any edit, new sandboxes use `container/sandbox-settings.json`. Secrets are not in that file:
 T3 keeps them under `secrets/`.
 
-Locally `SLEEP_AFTER_MS` is 20 seconds and the alarm runs every 5, so the proofs can watch it.
+Locally `SLEEP_AFTER_MS` is 90 seconds (above the minute between an open thread's views) and the alarm runs every 5, so the proofs can watch it.
 
 ## Shared skills and memories
 

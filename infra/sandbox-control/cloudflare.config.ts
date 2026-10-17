@@ -36,8 +36,9 @@ const localVars = {
   GITHUB_ORIGIN: `${MOCK}/github`,
   GITHUB_API_ORIGIN: `${MOCK}/github-api`,
   DEBUG_EXEC: "1",
-  // Short, so proofs can watch a settled sandbox fall asleep.
-  SLEEP_AFTER_MS: String(20 * 1000),
+  // Short, so proofs can watch a settled sandbox fall asleep, but longer than
+  // the minute between an open thread's views, so a viewed one stays up.
+  SLEEP_AFTER_MS: String(90 * 1000),
   LIFECYCLE_TICK_MS: String(5 * 1000),
   SHARED_S3_REGION: "auto",
   SHARED_BUCKET: `${WORKER_NAME}-shared`,

@@ -11596,11 +11596,12 @@ export default function ChatView(props: ChatViewProps) {
                   }
                   activeTurnStartedAt={paintOnlyDisplayedTimeline ? null : activeWorkStartedAt}
                   worktreeSetup={paintOnlyDisplayedTimeline ? null : worktreeSetup}
-                  onCancelWorktreeSetup={onCancelWorktreeSetup}
+                  // A sandbox's setup runs in the control plane; deleting its thread stops it.
+                  {...(sandboxComposer.setup ? {} : { onCancelWorktreeSetup })}
                   {...(paintOnlyDisplayedTimeline
                     ? {}
                     : { retryableWorkspacePreparationRunIds, onRetryWorkspacePreparation })}
-                  {...(draftId ? { onWorktreeSetupWorkLocally } : {})}
+                  {...(draftId && !sandboxComposer.setup ? { onWorktreeSetupWorkLocally } : {})}
                   {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
                   isPreparingWorktree={
                     !paintOnlyDisplayedTimeline &&

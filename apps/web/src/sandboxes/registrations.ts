@@ -8,15 +8,23 @@ import * as Stream from "effect/Stream";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import {
+  fetchSharedServerConfig,
   findSandboxProject,
   listSandboxes,
   sandboxRegistration,
+  shareServerConfig,
   type SandboxDirectoryState,
   type SandboxEntry,
   useSandboxDirectoryStore,
 } from "./directory";
 import { presumedOperateEnvironmentsAtom } from "./presumedScopes";
-import { borrowedServerConfig, seedSignature, seededSandboxShell } from "./seed";
+import {
+  borrowedServerConfig,
+  decodeSharedServerConfig,
+  encodeSharedServerConfig,
+  seedSignature,
+  seededSandboxShell,
+} from "./seed";
 
 type CacheStore = Persistence.EnvironmentCacheStore["Service"];
 
@@ -26,6 +34,8 @@ const DIRECTORY_POLL_INTERVAL = "3 seconds";
 const seeded = new Map<string, string>();
 /** Environments given another sandbox's server config, this page load. */
 const borrowed = new Set<string>();
+/** Whether this page load has shared a running sandbox's server config with the control plane. */
+let shared = false;
 
 /**
  * Seeds the cache of each sandbox that has never run, so the client shows its
@@ -55,16 +65,49 @@ const seedNeverRun = Effect.fn("SandboxRegistrations.seedNeverRun")(function* (
       borrowed.add(environmentId);
       continue;
     }
-    for (const donor of donors) {
-      const config = yield* cache.loadServerConfig(EnvironmentId.make(donor.environmentId));
-      if (Option.isNone(config)) continue;
-      yield* cache.saveServerConfig(
-        environmentId,
-        borrowedServerConfig(config.value, environmentId),
-      );
-      borrowed.add(environmentId);
-      break;
-    }
+    const config = yield* donorConfig(cache, donors).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not borrow a server config for a sandbox.", { error }),
+      ),
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    if (Option.isNone(config)) continue;
+    yield* cache.saveServerConfig(environmentId, borrowedServerConfig(config.value, environmentId));
+    borrowed.add(environmentId);
+  }
+  if (!shared) yield* shareRunningConfig(cache, donors).pipe(Effect.ignore);
+});
+
+/**
+ * A server config to borrow: one this browser has from a sandbox that ran,
+ * or else the one the control plane keeps, so a browser that has never
+ * connected to a sandbox can start a thread in one.
+ */
+const donorConfig = Effect.fn("SandboxRegistrations.donorConfig")(function* (
+  cache: CacheStore,
+  donors: ReadonlyArray<SandboxEntry & { environmentId: string }>,
+) {
+  for (const donor of donors) {
+    const config = yield* cache.loadServerConfig(EnvironmentId.make(donor.environmentId));
+    if (Option.isSome(config)) return config;
+  }
+  const json = yield* Effect.tryPromise(fetchSharedServerConfig);
+  return json === null ? Option.none() : Option.some(yield* decodeSharedServerConfig(json));
+});
+
+/** Gives the control plane a running sandbox's server config, for other browsers to borrow. */
+const shareRunningConfig = Effect.fn("SandboxRegistrations.shareRunningConfig")(function* (
+  cache: CacheStore,
+  donors: ReadonlyArray<SandboxEntry & { environmentId: string }>,
+) {
+  for (const donor of donors) {
+    if (donor.status !== "running") continue;
+    const config = yield* cache.loadServerConfig(EnvironmentId.make(donor.environmentId));
+    if (Option.isNone(config)) continue;
+    shared = true;
+    const json = yield* encodeSharedServerConfig(config.value);
+    yield* Effect.tryPromise(() => shareServerConfig(json));
+    return;
   }
 });
 

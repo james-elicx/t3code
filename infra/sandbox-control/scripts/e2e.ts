@@ -540,12 +540,12 @@ async function main() {
   clearInterval(viewing);
   viewing = undefined;
   // Nobody views it and it has no thread with work, so the lifecycle alarm puts it
-  // back to sleep (SLEEP_AFTER_MS is 20s locally).
+  // back to sleep (SLEEP_AFTER_MS is 90s locally).
   const idleStarted = Date.now();
   do {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     summary = await api(`/${threadId}`);
-    if (Date.now() - idleStarted > 120_000) break;
+    if (Date.now() - idleStarted > 180_000) break;
   } while (summary.status !== "asleep");
   check(
     "an unviewed sandbox with no work left falls asleep on its own",

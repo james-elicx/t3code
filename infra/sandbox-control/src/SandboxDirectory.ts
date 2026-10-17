@@ -41,6 +41,19 @@ export class SandboxDirectory extends DurableObject<Env> {
   }
 
   /**
+   * The last server config a client read from a running sandbox. Every
+   * sandbox runs the same image, so clients offer its providers and models
+   * for one that has not started.
+   */
+  async serverConfig(): Promise<string | null> {
+    return (await this.ctx.storage.get<string>("serverConfig")) ?? null;
+  }
+
+  async setServerConfig(json: string): Promise<void> {
+    await this.ctx.storage.put("serverConfig", json);
+  }
+
+  /**
    * Sandboxes running now save the settings edited in them, so a sandbox
    * starting next begins with them rather than waiting for their next tick.
    */
@@ -93,6 +106,11 @@ export class SandboxDirectory extends DurableObject<Env> {
     for (const summary of await this.unstartedSlots(repo)) {
       await exports.ThreadSandbox.getByName(summary.threadId).destroy();
     }
+  }
+
+  /** Gives every project an unstarted sandbox again, as when one was deleted by hand. */
+  async ensureSlots(): Promise<void> {
+    for (const project of await this.projects()) await this.ensureSlot(project.repo);
   }
 
   /** A project's unstarted sandbox took a thread; the next thread gets a fresh one. */

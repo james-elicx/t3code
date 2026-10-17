@@ -275,6 +275,21 @@ export async function removeSandboxProject(repo: string): Promise<void> {
   await listSandboxes();
 }
 
+/** The server config the control plane keeps for sandboxes that have not started, as JSON. */
+export async function fetchSharedServerConfig(): Promise<string | null> {
+  const url = sandboxDirectoryUrl();
+  if (url === null) return null;
+  const response = await fetch(`${url}/server-config`);
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(`Reading the shared server config failed (${response.status}).`);
+  return response.text();
+}
+
+export async function shareServerConfig(json: string): Promise<void> {
+  await request<null>("/server-config", { method: "PUT", body: json });
+}
+
 /**
  * Marks the sandbox as viewed, booting it if it was asleep. An open thread
  * calls it every minute; a sandbox nobody views sleeps once its work is done.
