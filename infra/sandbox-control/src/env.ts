@@ -8,6 +8,8 @@ export interface Env {
   /** Each sandbox's T3 home, saved when it sleeps and at checkpoints. */
   readonly BACKUPS: R2Bucket;
 
+  // Secrets, from `.dev.vars` locally and the secrets file when deployed.
+
   /**
    * Cloudflare Access: `https://<team>.cloudflareaccess.com` and the
    * application's AUD tag. Unset only in local development, where the Worker
@@ -15,8 +17,8 @@ export interface Env {
    */
   readonly ACCESS_TEAM_DOMAIN?: string;
   readonly ACCESS_AUD?: string;
-  /** `https://gateway.ai.cloudflare.com/v1/<account>/<gateway>`; a local mock in dev. */
-  readonly AI_GATEWAY_BASE_URL: string;
+  /** The gateway's endpoint as the dashboard shows it (see `aiGatewayBaseUrl`); a mock locally. */
+  readonly AI_GATEWAY_URL?: string;
   readonly AI_GATEWAY_TOKEN: string;
   readonly GITHUB_WRITE_PAT: string;
   /** Optional: without it, the session repository is fetched anonymously, so it must be public. */
@@ -35,11 +37,11 @@ export interface Env {
    * through R2's S3 API; without all three there is no mount. The keys stay in the Worker,
    * which signs each request.
    */
-  readonly SHARED_S3_ENDPOINT: string;
+  readonly SHARED_S3_ENDPOINT?: string;
+  readonly SHARED_S3_ACCESS_KEY_ID?: string;
+  readonly SHARED_S3_SECRET_ACCESS_KEY?: string;
   readonly SHARED_S3_REGION: string;
   readonly SHARED_BUCKET: string;
-  readonly SHARED_S3_ACCESS_KEY_ID: string;
-  readonly SHARED_S3_SECRET_ACCESS_KEY: string;
 }
 
 export interface EgressProps {

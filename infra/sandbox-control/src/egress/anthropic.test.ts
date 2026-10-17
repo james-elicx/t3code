@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { toAiGatewayRequest } from "./anthropic.ts";
+import { aiGatewayBaseUrl, toAiGatewayRequest } from "./anthropic.ts";
 
 const config = {
   baseUrl: "https://gateway.ai.cloudflare.com/v1/account-id/t3-sandboxes/",
@@ -35,5 +35,24 @@ describe("toAiGatewayRequest", () => {
     expect(
       toAiGatewayRequest(new Request("https://api.anthropic.com/api/oauth/token"), config),
     ).toBeNull();
+  });
+});
+
+describe("aiGatewayBaseUrl", () => {
+  it("takes the gateway's endpoint as the dashboard shows it, with or without a provider", () => {
+    const base = "https://gateway.ai.cloudflare.com/v1/account-id/t3-sandboxes";
+    expect(aiGatewayBaseUrl(base)).toBe(base);
+    expect(aiGatewayBaseUrl(` ${base}/anthropic\n`)).toBe(base);
+    expect(aiGatewayBaseUrl(`${base}/`)).toBe(base);
+    expect(aiGatewayBaseUrl("http://127.0.0.1:8790/gateway/v1/poc-account/poc-gateway")).toBe(
+      "http://127.0.0.1:8790/gateway/v1/poc-account/poc-gateway",
+    );
+  });
+
+  it("is null for anything that is not a gateway endpoint", () => {
+    expect(aiGatewayBaseUrl(undefined)).toBeNull();
+    expect(aiGatewayBaseUrl("")).toBeNull();
+    expect(aiGatewayBaseUrl("https://gateway.ai.cloudflare.com/v1/account-id")).toBeNull();
+    expect(aiGatewayBaseUrl("gateway.ai.cloudflare.com/v1/a/g")).toBeNull();
   });
 });

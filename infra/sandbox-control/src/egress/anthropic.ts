@@ -11,6 +11,16 @@ export interface AiGatewayConfig {
   readonly token: string;
 }
 
+/**
+ * The gateway's base URL from its endpoint as the dashboard shows it, or null
+ * when it is not one. The gateway may live in a different account from the
+ * Worker. A pasted provider suffix such as `/anthropic` is dropped; the
+ * rewrite adds its own. Any origin is accepted, for the local mock.
+ */
+export function aiGatewayBaseUrl(endpoint: string | undefined): string | null {
+  return /^(https?:\/\/[^\s]+?\/v1\/[^/\s]+\/[^/\s]+)/.exec(endpoint?.trim() ?? "")?.[1] ?? null;
+}
+
 /** Credentials the sandbox might send; each is a stand-in and must not travel on. */
 const SANDBOX_CREDENTIAL_HEADERS = ["x-api-key", "authorization", "cookie"];
 

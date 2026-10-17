@@ -3,3 +3,5 @@ GITHUB_WRITE_PAT=github_pat_poc_write_51c2e8
 GITHUB_READ_PAT=github_pat_poc_read_9d04b6
 SHARED_S3_ACCESS_KEY_ID=placeholder-shared-key-id
 SHARED_S3_SECRET_ACCESS_KEY=placeholder-shared-secret-7f3a
+AI_GATEWAY_URL=http://127.0.0.1:8790/gateway/v1/poc-account/poc-gateway
+SHARED_S3_ENDPOINT=http://127.0.0.1:8791

@@ -80,6 +80,18 @@ describe("hostedPairing", () => {
     expect(isHostedStaticApp(new URL("https://preview.t3.codes/"))).toBe(false);
   });
 
+  it("detects a build for any origin as the hosted app wherever it is served", () => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "self");
+    vi.stubEnv("VITE_HTTP_URL", "");
+    vi.stubEnv("VITE_WS_URL", "");
+
+    expect(isHostedStaticApp(new URL("https://t3-sandbox-control.acme.workers.dev/"))).toBe(true);
+    expect(isHostedStaticApp(new URL("http://localhost:8787/"))).toBe(true);
+
+    vi.stubEnv("VITE_HTTP_URL", "https://backend.example.com");
+    expect(isHostedStaticApp(new URL("https://t3-sandbox-control.acme.workers.dev/"))).toBe(false);
+  });
+
   it("detects hosted channel aliases as static apps", () => {
     vi.stubEnv("VITE_HOSTED_APP_URL", "https://app.t3.codes");
     vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "nightly");

@@ -10,8 +10,20 @@ export interface HostedPairingRequest {
 
 export type HostedAppChannel = "latest" | "nightly";
 
+/**
+ * `VITE_HOSTED_APP_URL=self` builds a hosted app for whichever origin serves
+ * it, for hosts that cannot know their URL at build time (the sandbox control
+ * plane's Worker).
+ */
+function hostedAtAnyOrigin(): boolean {
+  return import.meta.env.VITE_HOSTED_APP_URL?.trim() === "self";
+}
+
 /** The hosted app origin shared links point at. */
 export function configuredHostedAppUrl(): string {
+  if (hostedAtAnyOrigin() && typeof window !== "undefined" && window.location) {
+    return window.location.origin;
+  }
   return import.meta.env.VITE_HOSTED_APP_URL?.trim() || DEFAULT_HOSTED_APP_URL;
 }
 
@@ -37,7 +49,7 @@ export function isHostedStaticApp(url?: URL): boolean {
     return false;
   }
 
-  if (configuredHostedAppChannel()) {
+  if (configuredHostedAppChannel() || hostedAtAnyOrigin()) {
     return true;
   }
 

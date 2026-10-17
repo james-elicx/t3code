@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:web": "cd ../../apps/web && VITE_HOSTED_APP_URL=${SANDBOX_APP_URL:-http://localhost:8787} VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes vp build --outDir ../../infra/sandbox-control/.web-dist --emptyOutDir",
+    "build:web": "cd ../../apps/web && VITE_HOSTED_APP_URL=self VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes vp build --outDir ../../infra/sandbox-control/.web-dist --emptyOutDir",
     "dev": "cf dev",
     "deploy:test": "vp run build:web && cf deploy --mode test",
     "stage": "node scripts/stage-t3.ts",

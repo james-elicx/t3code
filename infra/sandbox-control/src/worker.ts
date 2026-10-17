@@ -46,8 +46,12 @@ export default {
  * loopback hosts are served, which is local development.
  */
 async function authorize(request: Request, env: Env, url: URL): Promise<string | null> {
-  if (env.ACCESS_TEAM_DOMAIN && env.ACCESS_AUD) {
-    return accessDenial(request, { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD });
+  const teamDomain = env.ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "");
+  const audience = env.ACCESS_AUD?.trim();
+  if (teamDomain && audience) {
+    // The issuer Access puts in its tokens, with or without the scheme pasted.
+    const issuer = teamDomain.includes("://") ? teamDomain : `https://${teamDomain}`;
+    return accessDenial(request, { teamDomain: issuer, audience });
   }
   return isLoopbackHost(url.hostname)
     ? null

@@ -126,8 +126,9 @@ and a failed mount leaves the sandbox up without it. Locally the mock serves a s
 
 ## The web client in sandbox mode
 
-`build:web` builds `apps/web` as a hosted app (`VITE_HOSTED_APP_URL`) with
-`VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes`. Only with both set does the client switch to sandbox
+`build:web` builds `apps/web` as a hosted app for whatever origin serves it
+(`VITE_HOSTED_APP_URL=self`) with `VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes`, so one build works
+locally and deployed. Only with both set does the client switch to sandbox
 mode, so other builds are unchanged. In sandbox mode:
 
 - Each sandbox in the directory that has booted is a platform environment at `/s/<thread-id>` on
@@ -152,7 +153,8 @@ mode, so other builds are unchanged. In sandbox mode:
 `cloudflare.config.ts` is the whole Worker config, read by the `cf` CLI (`cf dev`, `cf build`,
 `cf deploy`). `wrangler.config.ts` holds the bundler's settings: the assets directory and the dev
 port. Without a mode, every upstream is the mock and the secrets come from `.dev.vars`. `--mode
-test` is a deployed Worker, configured from the environment.
+test` is a deployed Worker; everything that differs between deployments is a secret, so a deploy
+needs only its secrets file.
 
 Everything is served from one hostname, so it works on workers.dev, which has no wildcard
 subdomains. A sandbox lives at `/s/<thread-id>/…`, and the Worker strips that prefix before
@@ -180,42 +182,38 @@ for them.
    gateway's token. Create a
    write PAT for pushes and PRs. A read PAT is optional: without one, the session repository is
    fetched anonymously, so only public repos work.
-2. **Deploy.** Put `AI_GATEWAY_TOKEN`, `GITHUB_WRITE_PAT` and `GITHUB_READ_PAT` in a secrets file
-   outside the repo, then:
-
-   ```sh
-   CLOUDFLARE_ACCOUNT_ID=<worker account> \
-   SANDBOX_APP_URL=https://t3-sandbox-control.<subdomain>.workers.dev \
-   SANDBOX_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<gateway account>/<gateway> \
-     vp run deploy:test --secrets-file <file>
-   ```
-
-   `deploy:test` builds the web client for `SANDBOX_APP_URL` first. The client is built for one
-   origin and fails to load anywhere else, so a deploy refuses a `.web-dist` built for another
-   (such as a local build for `localhost:8787`).
-
-   Leave `GITHUB_READ_PAT` empty to go without one. `DEBUG_EXEC` is off.
-
-   For shared skills and memories, create the R2 bucket `t3-sandbox-control-shared` and an R2 API
-   token with Object Read only, scoped to it. Add its keys to the secrets file as
-   `SHARED_S3_ACCESS_KEY_ID` and `SHARED_S3_SECRET_ACCESS_KEY`, and add
-   `SANDBOX_SHARED_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com` to the deploy
-   command. Without them, sandboxes have no `/shared`. Fill the bucket with
-   `wrangler r2 object put t3-sandbox-control-shared/<key> --file <file> --remote`.
-
-   The R2 bucket `t3-sandbox-control-backups` must exist in the Worker's account. Give it a
-   lifecycle rule that aborts incomplete multipart uploads after a day: a backup interrupted by a
-   restart leaves one behind.
-
-3. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
+2. **Shared skills and memories (optional).** Create the R2 bucket `t3-sandbox-control-shared` and
+   an R2 API token with Object Read only, scoped to it. Fill the bucket with
+   `wrangler r2 object put t3-sandbox-control-shared/<key> --file <file> --remote`. Without its
+   secrets, sandboxes have no `/shared`.
+3. **Backups.** The R2 bucket `t3-sandbox-control-backups` must exist in the Worker's account. Give
+   it a lifecycle rule that aborts incomplete multipart uploads after a day: a backup interrupted
+   by a restart leaves one behind.
+4. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
    `t3-sandbox-control.<subdomain>.workers.dev`, with an Allow policy for the people who should
    use it. Use a hostname application, not the Worker's "Protect this Worker behind Access"
    toggle: Worker-level Access rejects WebSocket upgrades, and the client talks to each sandbox
    over a WebSocket. Version preview URLs are off in the config, so the workers.dev hostname is
-   the only one.
-4. **Point the Worker at that application.** Copy the application's AUD tag and the team domain,
-   then deploy again with
-   `SANDBOX_ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com SANDBOX_ACCESS_AUD=<aud>` added.
+   the only one. Note the application's AUD tag and your team domain.
+5. **Deploy.** Write a secrets file outside the repo:
+
+   ```sh
+   AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<gateway account>/<gateway>
+   AI_GATEWAY_TOKEN=<gateway token>
+   GITHUB_WRITE_PAT=<write PAT>
+   # Empty: public repositories only.
+   GITHUB_READ_PAT=
+   ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
+   ACCESS_AUD=<application AUD tag>
+   # Optional, all three or none.
+   SHARED_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+   SHARED_S3_ACCESS_KEY_ID=<read-only key id>
+   SHARED_S3_SECRET_ACCESS_KEY=<read-only secret>
+   ```
+
+   then `CLOUDFLARE_ACCOUNT_ID=<worker account> vp run deploy:test --secrets-file <file>`.
+   `AI_GATEWAY_URL` may be any endpoint URL the gateway's dashboard shows; the Worker keeps the
+   `/v1/<account>/<gateway>` part. `deploy:test` builds the web client first. `DEBUG_EXEC` is off.
 
 To run `e2e:ui` against the deployment, create a service token, add a Service Auth policy for it to
 the application, and set `BASE_URL`, `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`. The mock
