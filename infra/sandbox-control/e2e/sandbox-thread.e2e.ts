@@ -8,9 +8,10 @@ import { expect, test, type Page } from "@playwright/test";
  * thread's first message (the thread lists at once and shows its sandbox
  * being set up, then Claude answers through the egress proxy), start a
  * second thread in its own sandbox, let a sandbox sleep and reopen its
- * thread, and delete a thread with its sandbox. Along the way: a repository
- * the control plane can't read, and a browser that has never seen the
- * project or its sandboxes.
+ * thread, delete a thread with its sandbox (from the client, or in T3 behind
+ * the control plane's back), and remove the project. Along the way: a control
+ * plane no sandbox has run on, a repository it can't read, and a browser that
+ * has never seen the project or its sandboxes.
  */
 
 const MOCK_URL = process.env.MOCK_URL ?? "http://127.0.0.1:8790";
@@ -138,7 +139,7 @@ const setupCard = () => page.getByText("Setting up sandbox…");
  * sandbox. The thread lists at once, with the message and its sandbox's setup,
  * as a thread on any machine shows its worktree being made.
  */
-const startThread = async ({ setup }: { setup: boolean }) => {
+const startThread = async () => {
   const before = new Set(
     (await sandboxes())
       .filter((entry) => entry.status !== "unstarted")
@@ -152,10 +153,8 @@ const startThread = async ({ setup }: { setup: boolean }) => {
   await expect(page.locator('[data-message-role="user"]').last()).toContainText(PROMPT, {
     timeout: 5000,
   });
-  if (setup) {
-    await expect(setupCard()).toBeVisible({ timeout: 5000 });
-    await expect(page.getByLabel("Worktree setup")).toContainText("Clone repository and start T3");
-  }
+  await expect(setupCard()).toBeVisible({ timeout: 5000 });
+  await expect(page.getByLabel("Worktree setup")).toContainText("Clone repository and start T3");
   await expect(threadRows().filter({ hasText: PROMPT })).not.toHaveCount(0);
 
   await expect(assistantMessages().last()).toContainText(mockAvailable ? MOCK_REPLY : /\S/, {
@@ -173,22 +172,61 @@ const startThread = async ({ setup }: { setup: boolean }) => {
 };
 
 /**
- * Before any sandbox has run, nothing knows which models a sandbox offers, so
- * the first draft boots its sandbox to find out; the message waits for it,
- * as it would for any machine still connecting.
+ * Deletes a thread in its sandbox's T3 directly, as an agent or another
+ * client would, without telling the control plane. From the page, so it
+ * carries the page's Access session.
  */
-const bootFirstSandboxEver = async () => {
-  const shared = await page.request.get("/api/sandboxes/server-config");
-  if (shared.status() !== 404) return false;
-  const booting = page.getByText("Setting up a sandbox…");
-  await expect(booting).toBeVisible();
-  await expect(booting).toBeHidden({ timeout: BOOT_TIMEOUT });
-  // Shared by this browser, for every other one.
+const deleteInT3 = (sandboxId: string, threadId: string) =>
+  page.evaluate(
+    async ({ sandboxId, threadId }) => {
+      const base = `/s/${sandboxId}`;
+      const ticket = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST" });
+      const query = new URLSearchParams({
+        wsTicket: ((await ticket.json()) as { ticket: string }).ticket,
+        orchestrationProtocol: "2",
+      });
+      const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}${base}/ws?${query}`);
+      return new Promise<string>((resolve, reject) => {
+        socket.addEventListener("error", () => reject(new Error("The socket failed.")));
+        socket.addEventListener("message", (event) => {
+          for (const message of [JSON.parse(String(event.data))].flat()) {
+            if (message._tag !== "Exit") continue;
+            socket.close();
+            resolve(message.exit._tag);
+          }
+        });
+        socket.addEventListener("open", () =>
+          socket.send(
+            JSON.stringify({
+              _tag: "Request",
+              id: "delete",
+              tag: "orchestration.dispatchCommand",
+              payload: { type: "thread.delete", commandId: crypto.randomUUID(), threadId },
+              headers: [],
+            }),
+          ),
+        );
+      });
+    },
+    { sandboxId, threadId },
+  );
+
+test("before any sandbox has run, the control plane learns which models sandboxes offer", async () => {
+  // Development only: back to a control plane no sandbox has run on.
+  const reset = await page.request.delete("/api/sandboxes/server-config");
+  test.skip(reset.status() === 405, "Forgetting the server config needs DEBUG_EXEC.");
+  const statuses = async () =>
+    (await sandboxes()).map((entry) => `${entry.threadId}:${entry.status}`).sort();
+  const before = await statuses();
+  await page.goto("/");
   await expect
-    .poll(async () => (await page.request.get("/api/sandboxes/server-config")).status())
+    .poll(async () => (await page.request.get("/api/sandboxes/server-config")).status(), {
+      timeout: BOOT_TIMEOUT,
+    })
     .toBe(200);
-  return true;
-};
+  // Without starting anyone's sandbox.
+  expect(await statuses()).toEqual(before);
+});
 
 test("a repository the control plane can't read is refused before any thread", async () => {
   await page.goto("/sandbox");
@@ -210,6 +248,8 @@ test("a repository is a project before any sandbox runs", async () => {
   await expect(page).toHaveURL(/\/draft\//);
   await expect(composer()).toBeVisible();
   await expect(draftHero()).toBeVisible();
+  // With the models a sandbox offers.
+  await expect(page.getByText("Choose model")).toHaveCount(0);
   expect((await sandboxesSince(before)).map((entry) => entry.pendingThread)).not.toContainEqual(
     expect.anything(),
   );
@@ -221,10 +261,8 @@ test("a repository is a project before any sandbox runs", async () => {
 
 test("a thread's first message starts its sandbox, and Claude answers through the egress proxy", async () => {
   await page.goto("/");
-  const bootedFirst = await bootFirstSandboxEver();
   if (mockAvailable) await fetch(`${MOCK_URL}/__recorded`, { method: "DELETE" });
-  // The first sandbox ever is already up by now; any other starts with the message.
-  firstThreadUrl = await startThread({ setup: !bootedFirst });
+  firstThreadUrl = await startThread();
   await expect(threadRows()).toHaveCount(1);
 
   if (!mockAvailable) return;
@@ -252,7 +290,7 @@ test("a new thread in the project starts in a sandbox of its own", async () => {
     .first()
     .click();
   await expect(page).toHaveURL(/\/draft\//);
-  secondThreadUrl = await startThread({ setup: true });
+  secondThreadUrl = await startThread();
   expect(environmentOf(secondThreadUrl)).not.toBe(environmentOf(firstThreadUrl));
   await expect(threadRows()).toHaveCount(2);
 });
@@ -332,6 +370,27 @@ test("deleting a thread deletes its sandbox", async () => {
     .poll(async () => (await sandboxes()).some((entry) => entry.threadId === sandbox!.threadId))
     .toBe(false);
   await expect(threadRows()).toHaveCount(1);
+});
+
+test("a thread deleted in its sandbox, around the control plane, still deletes the sandbox", async () => {
+  const [environmentId, threadId] = new URL(firstThreadUrl).pathname
+    .split("/")
+    .slice(1)
+    .map(decodeURIComponent);
+  const sandbox = (await sandboxes()).find((entry) => entry.environmentId === environmentId);
+  expect(sandbox).toBeDefined();
+  await page.goto(firstThreadUrl);
+  await expect
+    .poll(async () => (await sandboxes()).find((entry) => entry.threadId === sandbox!.threadId))
+    .toMatchObject({ status: "running" });
+
+  expect(await deleteInT3(sandbox!.threadId, threadId!)).toBe("Success");
+  await expect
+    .poll(async () => (await sandboxes()).some((entry) => entry.threadId === sandbox!.threadId), {
+      timeout: 60_000,
+    })
+    .toBe(false);
+  await expect(threadRows()).toHaveCount(0);
 });
 
 test("removing the project removes it, and its sandboxes, from the control plane", async () => {

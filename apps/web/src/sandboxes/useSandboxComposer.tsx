@@ -9,7 +9,6 @@ import { useServerConfigs } from "../state/entities";
 import {
   isSandboxMode,
   type SandboxEntry,
-  startSandbox,
   useSandboxDirectoryStore,
   wakeSandbox,
 } from "./directory";
@@ -17,8 +16,6 @@ import { SANDBOX_SETUP_LABELS, useSandboxSetup } from "./setup";
 import { useSandboxDraftPlacement, useSandboxToggle } from "./useSandboxToggle";
 
 const VIEW_INTERVAL_MS = 60_000;
-/** How long a draft in an unstarted sandbox waits for a borrowed server config before booting it. */
-const CONFIG_GRACE_MS = 3_000;
 
 const sandboxFor = (entries: ReadonlyArray<SandboxEntry>, environmentId: EnvironmentId | null) =>
   environmentId === null || !isSandboxMode()
@@ -51,29 +48,6 @@ function useSandboxPresence(environmentId: EnvironmentId | null) {
 }
 
 /**
- * A draft in an unstarted sandbox offers the models of any sandbox this
- * browser has seen. With none seen yet, the sandbox boots now, so the
- * composer can offer its models; its first message then starts the thread
- * the normal way.
- */
-function useFirstSandboxWarmup(
-  sandbox: ReturnType<typeof useSandboxPresence>,
-  environmentId: EnvironmentId | null,
-) {
-  const configs = useServerConfigs();
-  const hasConfig = environmentId !== null && configs.has(environmentId);
-  const { sandboxId, status } = sandbox;
-  useEffect(() => {
-    if (sandboxId === null || status !== "unstarted" || hasConfig) return;
-    const timeout = setTimeout(
-      () => void startSandbox(sandboxId, {}).catch(() => undefined),
-      CONFIG_GRACE_MS,
-    );
-    return () => clearTimeout(timeout);
-  }, [hasConfig, sandboxId, status]);
-}
-
-/**
  * Everything ChatView needs for sandboxes: the draft's placement, the setup
  * card while a new sandbox boots, and waking the one an open thread lives in.
  */
@@ -86,12 +60,14 @@ export function useSandboxComposer(input: {
   const toggle = useSandboxToggle(input.draftId, input.projectRef);
   useSandboxDraftPlacement(input.draftId, input.projectRef, toggle);
   const presence = useSandboxPresence(input.environmentId);
-  useFirstSandboxWarmup(presence, input.draftId === null ? null : input.environmentId);
+  const configs = useServerConfigs();
   const setup = useSandboxSetup(input.environmentId, input.threadId);
   const { sandboxId, status, hasRun } = presence;
   const isSandbox = sandboxId !== null;
   const waking = isSandbox && hasRun && status !== "running";
   const booting = isSandbox && !hasRun && status !== "unstarted";
+  // Only before the control plane's first boot, which it starts on its own.
+  const awaitingConfig = isSandbox && status === "unstarted" && !configs.has(input.environmentId);
 
   const banner = useMemo<ComposerBannerStackItem | null>(() => {
     if (waking) {
@@ -112,11 +88,21 @@ export function useSandboxComposer(input: {
         priority: "activity",
         icon: <BoxIcon />,
         title: "Setting up a sandbox…",
-        description: "The first sandbox clones the repository before it can offer its models.",
+        description: "It clones the repository and starts T3.",
+      };
+    }
+    if (awaitingConfig) {
+      return {
+        id: `sandbox-config:${input.environmentId}`,
+        variant: "default",
+        priority: "activity",
+        icon: <BoxIcon />,
+        title: "Getting sandboxes ready…",
+        description: "The control plane is starting T3 once to learn which models sandboxes offer.",
       };
     }
     return null;
-  }, [booting, input.environmentId, setup, waking]);
+  }, [awaitingConfig, booting, input.environmentId, setup, waking]);
 
   return {
     banner,

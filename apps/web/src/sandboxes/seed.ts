@@ -117,8 +117,7 @@ export function borrowedServerConfig(config: ServerConfig, environmentId: string
 }
 
 const ServerConfigJson = Schema.fromJsonString(ServerConfig);
-/** A server config as the control plane keeps it for other clients to borrow. */
-export const encodeSharedServerConfig = Schema.encodeEffect(ServerConfigJson);
+/** A server config as the control plane keeps it. */
 export const decodeSharedServerConfig = Schema.decodeUnknownEffect(ServerConfigJson);
 
 /** Changes whenever the seeded shell would, so it is written only then. */

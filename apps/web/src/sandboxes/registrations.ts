@@ -1,6 +1,6 @@
 import type { PlatformConnectionRegistration } from "@t3tools/client-runtime/connection";
 import type { Persistence } from "@t3tools/client-runtime/platform";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type ServerConfig } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -12,16 +12,13 @@ import {
   findSandboxProject,
   listSandboxes,
   sandboxRegistration,
-  shareServerConfig,
   type SandboxDirectoryState,
-  type SandboxEntry,
   useSandboxDirectoryStore,
 } from "./directory";
 import { presumedOperateEnvironmentsAtom } from "./presumedScopes";
 import {
   borrowedServerConfig,
   decodeSharedServerConfig,
-  encodeSharedServerConfig,
   seedSignature,
   seededSandboxShell,
 } from "./seed";
@@ -32,25 +29,22 @@ const DIRECTORY_POLL_INTERVAL = "3 seconds";
 
 /** What each environment's cache was last seeded with, this page load. */
 const seeded = new Map<string, string>();
-/** Environments given another sandbox's server config, this page load. */
+/** Environments given the control plane's server config, this page load. */
 const borrowed = new Set<string>();
-/** Whether this page load has shared a running sandbox's server config with the control plane. */
-let shared = false;
+/** The control plane's server config, read once a page load once it has one. */
+let shared = Option.none<ServerConfig>();
 
 /**
  * Seeds the cache of each sandbox that has never run, so the client shows its
- * project, and its thread once started, before the sandbox answers. Runs
- * before the registrations are emitted: a client reads an environment's cache
- * when it registers it, and again when its registration changes.
+ * project, its models, and its thread once started, before the sandbox
+ * answers. Runs before the registrations are emitted: a client reads an
+ * environment's cache when it registers it, and again when its registration
+ * changes.
  */
 const seedNeverRun = Effect.fn("SandboxRegistrations.seedNeverRun")(function* (
   cache: CacheStore,
   state: SandboxDirectoryState,
 ) {
-  const donors = state.entries.filter(
-    (entry): entry is SandboxEntry & { environmentId: string } =>
-      entry.ranAt !== null && entry.environmentId !== null,
-  );
   for (const entry of state.entries) {
     if (entry.ranAt !== null || entry.environmentId === null) continue;
     const environmentId = EnvironmentId.make(entry.environmentId);
@@ -61,54 +55,29 @@ const seedNeverRun = Effect.fn("SandboxRegistrations.seedNeverRun")(function* (
       seeded.set(environmentId, signature);
     }
     if (borrowed.has(environmentId)) continue;
-    if (Option.isSome(yield* cache.loadServerConfig(environmentId))) {
-      borrowed.add(environmentId);
-      continue;
-    }
-    const config = yield* donorConfig(cache, donors).pipe(
+    const config = yield* sharedServerConfig().pipe(
       Effect.tapError((error) =>
-        Effect.logWarning("Could not borrow a server config for a sandbox.", { error }),
+        Effect.logWarning("Could not read the sandboxes' server config.", { error }),
       ),
-      Effect.orElseSucceed(() => Option.none()),
+      Effect.orElseSucceed(() => Option.none<ServerConfig>()),
     );
     if (Option.isNone(config)) continue;
     yield* cache.saveServerConfig(environmentId, borrowedServerConfig(config.value, environmentId));
     borrowed.add(environmentId);
   }
-  if (!shared) yield* shareRunningConfig(cache, donors).pipe(Effect.ignore);
 });
 
 /**
- * A server config to borrow: one this browser has from a sandbox that ran,
- * or else the one the control plane keeps, so a browser that has never
- * connected to a sandbox can start a thread in one.
+ * The server config the control plane keeps from the last sandbox that
+ * booted: every sandbox runs the same image, so it is what one that has not
+ * started offers. None until the control plane's first boot.
  */
-const donorConfig = Effect.fn("SandboxRegistrations.donorConfig")(function* (
-  cache: CacheStore,
-  donors: ReadonlyArray<SandboxEntry & { environmentId: string }>,
-) {
-  for (const donor of donors) {
-    const config = yield* cache.loadServerConfig(EnvironmentId.make(donor.environmentId));
-    if (Option.isSome(config)) return config;
-  }
+const sharedServerConfig = Effect.fn("SandboxRegistrations.sharedServerConfig")(function* () {
+  if (Option.isSome(shared)) return shared;
   const json = yield* Effect.tryPromise(fetchSharedServerConfig);
-  return json === null ? Option.none() : Option.some(yield* decodeSharedServerConfig(json));
-});
-
-/** Gives the control plane a running sandbox's server config, for other browsers to borrow. */
-const shareRunningConfig = Effect.fn("SandboxRegistrations.shareRunningConfig")(function* (
-  cache: CacheStore,
-  donors: ReadonlyArray<SandboxEntry & { environmentId: string }>,
-) {
-  for (const donor of donors) {
-    if (donor.status !== "running") continue;
-    const config = yield* cache.loadServerConfig(EnvironmentId.make(donor.environmentId));
-    if (Option.isNone(config)) continue;
-    shared = true;
-    const json = yield* encodeSharedServerConfig(config.value);
-    yield* Effect.tryPromise(() => shareServerConfig(json));
-    return;
-  }
+  if (json === null) return Option.none<ServerConfig>();
+  shared = Option.some(yield* decodeSharedServerConfig(json));
+  return shared;
 });
 
 /** A project's unstarted sandbox takes its first thread through the control plane. */
@@ -132,7 +101,10 @@ const registrationsFor = (cache: CacheStore, state: SandboxDirectoryState) =>
     Effect.tap(() => Effect.sync(() => presumeUnstarted(state))),
     Effect.as(
       state.entries.flatMap((entry): ReadonlyArray<PlatformConnectionRegistration> => {
-        const registration = sandboxRegistration(entry);
+        // Registered again once seeded with a server config, so the client reads it.
+        const configured =
+          entry.ranAt !== null || entry.environmentId === null || borrowed.has(entry.environmentId);
+        const registration = sandboxRegistration(entry, configured);
         return registration === null ? [] : [registration];
       }),
     ),

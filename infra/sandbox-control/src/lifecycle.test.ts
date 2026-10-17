@@ -4,6 +4,7 @@ import { lifecycleVerdict, type LifecycleInput, type ShellThread } from "./lifec
 
 const MINUTE = 60_000;
 const settled: ShellThread = {
+  id: "thread-1",
   settledAt: "2026-10-17T10:00:00.000Z",
   activeRunId: null,
   archivedAt: null,
@@ -11,6 +12,7 @@ const settled: ShellThread = {
 };
 const base: LifecycleInput = {
   threads: [settled],
+  threadId: "thread-1",
   viewedAt: 0,
   activeAt: 0,
   savedAt: 0,
@@ -44,7 +46,13 @@ describe("lifecycleVerdict", () => {
   });
 
   it("sleeps a sandbox that never got a thread once nobody views it", () => {
-    expect(lifecycleVerdict({ ...base, threads: [] })).toBe("sleep");
+    expect(lifecycleVerdict({ ...base, threads: [], threadId: null })).toBe("sleep");
+  });
+
+  it("deletes a sandbox whose thread was deleted, even while someone is viewing it", () => {
+    expect(lifecycleVerdict({ ...base, threads: [], viewedAt: base.now })).toBe("delete");
+    const other = { ...settled, id: "thread-2", settledAt: null };
+    expect(lifecycleVerdict({ ...base, threads: [other] })).toBe("delete");
   });
 
   it("checkpoints an awake sandbox only when something happened since the last save", () => {

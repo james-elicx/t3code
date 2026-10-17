@@ -132,10 +132,17 @@ export function newSandboxId(): string {
  * label changes when a thread starts it, which makes the client re-read the
  * environment's cached shell (see registrations.ts).
  */
-export function sandboxRegistration(entry: SandboxEntry): BearerConnectionRegistration | null {
+/**
+ * `configured` is false while a sandbox that has never run has no server
+ * config in this browser's cache; the registration differs until it has one.
+ */
+export function sandboxRegistration(
+  entry: SandboxEntry,
+  configured = true,
+): BearerConnectionRegistration | null {
   if (entry.environmentId === null) return null;
   const environmentId = EnvironmentId.make(entry.environmentId);
-  const connectionId = `sandbox:${entry.threadId}`;
+  const connectionId = `sandbox:${entry.threadId}${configured ? "" : ":unconfigured"}`;
   const label =
     entry.status === "unstarted"
       ? `New sandbox · ${entry.repo}`
@@ -284,10 +291,6 @@ export async function fetchSharedServerConfig(): Promise<string | null> {
   if (!response.ok)
     throw new Error(`Reading the shared server config failed (${response.status}).`);
   return response.text();
-}
-
-export async function shareServerConfig(json: string): Promise<void> {
-  await request<null>("/server-config", { method: "PUT", body: json });
 }
 
 /**

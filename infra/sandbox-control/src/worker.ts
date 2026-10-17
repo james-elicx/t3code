@@ -76,12 +76,13 @@ async function api(
   const method = request.method;
 
   if (id === "projects") return projectsApi(request, env, exports, action, extra);
-  if (id === "server-config") return serverConfigApi(request, exports);
+  if (id === "server-config") return serverConfigApi(request, env, exports);
 
   if (id === undefined || id === "") {
     if (method === "GET") {
       const plane = directory(exports);
       await plane.ensureSlots();
+      await plane.ensureServerConfig();
       const [sandboxes, projects] = await Promise.all([plane.list(), plane.projects()]);
       return Response.json({
         sandboxes: sandboxes.map((summary) => withRoutes(summary, url)),
@@ -155,10 +156,12 @@ async function api(
   return text(404, "Not found.");
 }
 
-const SERVER_CONFIG_MAX_BYTES = 1024 * 1024;
-
-/** The server config clients borrow for a sandbox that has not started (see SandboxDirectory). */
-async function serverConfigApi(request: Request, exports: ControlPlaneExports): Promise<Response> {
+/** The server config clients offer in a sandbox that has not started; see `ensureServerConfig`. */
+async function serverConfigApi(
+  request: Request,
+  env: Env,
+  exports: ControlPlaneExports,
+): Promise<Response> {
   const plane = directory(exports);
   if (request.method === "GET") {
     const config = await plane.serverConfig();
@@ -166,22 +169,12 @@ async function serverConfigApi(request: Request, exports: ControlPlaneExports): 
       ? text(404, "No sandbox has run yet.")
       : new Response(config, { headers: { "content-type": "application/json" } });
   }
-  if (request.method === "PUT") {
-    const body = await request.text();
-    if (body.length > SERVER_CONFIG_MAX_BYTES) return text(413, "The server config is too large.");
-    let parsed: unknown = null;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      // Not JSON: refused below.
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return text(400, "The server config must be a JSON object.");
-    }
-    await plane.setServerConfig(body);
+  // Development only: back to a control plane no sandbox has run on.
+  if (request.method === "DELETE" && env.DEBUG_EXEC === "1") {
+    await plane.forgetServerConfig();
     return new Response(null, { status: 204 });
   }
-  return text(405, "Use GET or PUT.");
+  return text(405, "Use GET.");
 }
 
 /** Why the control plane's read token can't use the repository, or null when it can. */

@@ -87,6 +87,13 @@ export interface PendingThread {
   readonly interactionMode: string;
 }
 
+/** The one RPC message `readServerConfig` reads; others it skips. */
+interface RpcExit {
+  readonly _tag: string;
+  readonly requestId?: string;
+  readonly exit: { readonly _tag: string; readonly value?: unknown };
+}
+
 interface SandboxRecord {
   readonly threadId: string;
   readonly title: string;
@@ -113,6 +120,8 @@ interface SandboxRecord {
   readonly settings?: string;
   /** Saved and destroyed; only `/wake` or a create boots it again. */
   asleep?: boolean;
+  /** Boots once without a repository to read the server config, then deletes itself. */
+  probe?: boolean;
   /** The T3 home (T3's database, settings, Claude's transcripts) in R2. */
   backup?: DirectoryBackupRecord;
   /** The whole disk: the checkout, uncommitted work, installed dependencies. */
@@ -260,6 +269,28 @@ export class ThreadSandbox extends DurableObject<Env> {
     return this.summary(started);
   }
 
+  /** See `SandboxDirectory.ensureServerConfig`. Unlisted; boots from the alarm. */
+  async probe(id: string): Promise<void> {
+    if (await this.record()) return;
+    const now = new Date().toISOString();
+    const settings = await directory(controlPlane(this.ctx)).settingsTemplate();
+    await this.save({
+      threadId: id,
+      title: "Server config probe",
+      repo: { owner: "t3", name: "probe" },
+      baseBranch: "main",
+      branchPrefix: sessionBranchPrefix(id),
+      createdAt: now,
+      instance: "standard-1",
+      lastActivityAt: now,
+      viewedAt: now,
+      pullRequests: [],
+      probe: true,
+      ...(settings ? { settings } : {}),
+    });
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
   async create(input: CreateSandboxInput): Promise<SandboxSummary> {
     const existing = await this.record();
     if (existing && !existing.unstarted) return this.summary(existing);
@@ -274,6 +305,14 @@ export class ThreadSandbox extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const record = await this.record();
     if (!record || record.asleep || record.unstarted) return;
+    if (record.probe) {
+      // The boot stores the server config.
+      await this.ready().catch((error: unknown) =>
+        console.error("probing the server config failed", String(error)),
+      );
+      await this.destroy();
+      return;
+    }
     try {
       if (!this.t3Ready || !this.container.running) await this.ready();
       else await this.tick(record);
@@ -473,6 +512,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     );
     const verdict = lifecycleVerdict({
       threads: shell.threads,
+      threadId: record.launch && record.launchedAt ? record.launch.threadId : null,
       viewedAt: Date.parse(record.viewedAt),
       activeAt: Date.parse(record.lastActivityAt),
       savedAt: Date.parse(record.savedAt ?? record.createdAt),
@@ -480,6 +520,10 @@ export class ThreadSandbox extends DurableObject<Env> {
       sleepAfterMs: Number(this.env.SLEEP_AFTER_MS),
       checkpointEveryMs: CHECKPOINT_EVERY_MS,
     });
+    if (verdict === "delete") {
+      await this.destroy();
+      return;
+    }
     if (verdict === "sleep") {
       await this.sleep();
       return;
@@ -608,6 +652,7 @@ export class ThreadSandbox extends DurableObject<Env> {
         env: {
           ...this.sandboxEnv(record),
           T3_SANDBOX_PREPARED: preparedToken,
+          ...(record.probe ? { T3_SANDBOX_PROBE: "1" } : {}),
           ...(record.environmentId ? { T3_SANDBOX_ENVIRONMENT_ID: record.environmentId } : {}),
           ...(!record.backup && record.settings ? { T3_SANDBOX_SETTINGS: record.settings } : {}),
         },
@@ -651,14 +696,83 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.settingsBaseline = await this.readSettings();
     }
     if (!record.ranAt) await this.setStep(record, "launch");
-    this.projectBaseline = await this.ensureProject(record, token);
-    await this.launchPending(record, token);
+    if (!record.probe) {
+      this.projectBaseline = await this.ensureProject(record, token);
+      await this.launchPending(record, token);
+    }
     this.step = null;
     record.environmentId = descriptor.environmentId;
     record.ranAt ??= new Date().toISOString();
     this.t3Ready = true;
     await this.save(record);
+    if (startedHere) {
+      await this.captureServerConfig(token).catch((error: unknown) =>
+        console.warn("reading the server config failed", String(error)),
+      );
+    }
     return token;
+  }
+
+  /**
+   * Keeps this image's server config (its providers, models and settings) in
+   * the directory, so a client can offer them in a sandbox that has not started.
+   */
+  private async captureServerConfig(token: string) {
+    await directory(controlPlane(this.ctx)).setServerConfig(await this.readServerConfig(token));
+  }
+
+  /** T3 serves its config only over its RPC socket: one `server.getConfig` request. */
+  private async readServerConfig(token: string): Promise<string> {
+    const ticket = await this.t3Fetch("/api/auth/websocket-ticket", token, { method: "POST" });
+    if (!ticket.ok) throw new Error(`POST /api/auth/websocket-ticket: HTTP ${ticket.status}`);
+    const query = new URLSearchParams({
+      wsTicket: ((await ticket.json()) as { ticket: string }).ticket,
+      orchestrationProtocol: "2",
+    });
+    const response = await this.container
+      .getTcpPort(T3_PORT)
+      .fetch(`http://container/ws?${query}`, { headers: { upgrade: "websocket" } });
+    const socket = response.webSocket;
+    if (!socket) throw new Error(`GET /ws: HTTP ${response.status}`);
+    socket.accept();
+    const decoder = new TextDecoder();
+    return new Promise<string>((resolve, reject) => {
+      const finish = (settle: () => void) => {
+        clearTimeout(timer);
+        try {
+          socket.close(1000);
+        } catch {}
+        settle();
+      };
+      const timer = setTimeout(
+        () => finish(() => reject(new Error("T3 did not answer server.getConfig."))),
+        15_000,
+      );
+      socket.addEventListener("message", (event) => {
+        const data = typeof event.data === "string" ? event.data : decoder.decode(event.data);
+        for (const message of [JSON.parse(data) as RpcExit].flat()) {
+          if (message._tag !== "Exit" || message.requestId !== "config") continue;
+          const { exit } = message;
+          finish(() =>
+            exit._tag === "Success"
+              ? resolve(JSON.stringify(exit.value))
+              : reject(new Error(`server.getConfig failed: ${JSON.stringify(exit)}`)),
+          );
+        }
+      });
+      socket.addEventListener("close", () =>
+        finish(() => reject(new Error("T3 closed the socket."))),
+      );
+      socket.send(
+        JSON.stringify({
+          _tag: "Request",
+          id: "config",
+          tag: "server.getConfig",
+          payload: {},
+          headers: [],
+        }),
+      );
+    });
   }
 
   private async setStep(record: SandboxRecord, step: SetupStep) {
@@ -916,7 +1030,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     // A checkpoint or watcher finishing after deletion must not bring the record back.
     if (this.destroyed) return;
     await this.ctx.storage.put("record", record);
-    await directory(controlPlane(this.ctx)).upsert(this.summary(record));
+    if (!record.probe) await directory(controlPlane(this.ctx)).upsert(this.summary(record));
   }
 
   private status(record: SandboxRecord): SandboxStatus {

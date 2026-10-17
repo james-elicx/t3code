@@ -59,10 +59,11 @@ Two test suites run against the running control plane:
 - `vp run e2e` creates a sandbox and proves each control-plane claim with shell-level evidence,
   including a `claude -p` turn through the gateway rewrite. It prints PASS/FAIL per claim and
   destroys the sandbox, and the project if it added it. Set `KEEP=1` to keep them.
-- `vp run e2e:ui` drives the web client in headless Chromium: add a repository (and one the
-  control plane can't read), start a thread and chat, start a second thread in its own sandbox,
-  put a sandbox to sleep and reopen its thread, list an asleep sandbox's thread in a fresh browser,
-  delete a thread with its sandbox, and remove the project. It checks the mock's records to confirm
+- `vp run e2e:ui` drives the web client in headless Chromium: learn the models on a control plane
+  no sandbox has run on (with `DEBUG_EXEC`), add a repository (and one the control plane can't
+  read), start a thread and chat, start a second thread in its own sandbox, put a sandbox to sleep
+  and reopen its thread, list an asleep sandbox's thread in a fresh browser, delete a thread with
+  its sandbox (from the client, and in T3 behind the control plane's back), and remove the project. It checks the mock's records to confirm
   Claude's own request went through the egress proxy. Set `BASE_URL` to run it against a deployment
   (see below); the mock checks are skipped when `MOCK_URL` is unreachable. It deletes the sandboxes
   and project it added unless `KEEP=1`.
@@ -136,10 +137,13 @@ mode, so other builds are unchanged. In sandbox mode:
   credential.
 - The control plane keeps your repositories as projects, and each project has one unstarted
   sandbox with its environment id already assigned. The client lists that environment from a
-  seeded cache, with the project and a server config borrowed from another environment (or the
-  copy the control plane keeps from the last sandbox that ran), so a project has drafts, settings
-  and a "New thread" before any sandbox has run. The very first sandbox has no config to borrow;
-  the client boots it once ("Setting up a sandbox…") to get one.
+  seeded cache, with the project and the server config (providers, models, settings) the control
+  plane keeps, so a project has drafts, settings and a "New thread" before any sandbox has run.
+- T3 serves its server config only over its RPC socket, so the control plane reads it there
+  (`server.getConfig`) on every boot. On a control plane no sandbox has run on, the first
+  directory read starts a probe: the image booted once without a repository, unlisted, deleted once
+  it has the config (about 20 seconds locally). A draft opened before then shows "Getting sandboxes
+  ready…" and gets its models when the probe finishes.
 - A draft's first message starts the project's unstarted sandbox with that message
   (`POST /:id/start`). The thread lists at once and shows "Setting up sandbox…" with the boot steps,
   as a thread on a computer shows its worktree being made, and the control plane gives the project
@@ -153,7 +157,9 @@ mode, so other builds are unchanged. In sandbox mode:
 - Opening a thread calls `/wake` and shows "Waking the sandbox…" until it runs; the transcript
   reads from the browser's cache meanwhile. A browser that has never seen a sandbox wakes it once
   to list its thread.
-- Deleting the thread deletes its sandbox, asleep or not.
+- Deleting the thread deletes its sandbox, asleep or not. A thread deleted in T3 itself (by an
+  agent, or a client that does not know about sandboxes) deletes its sandbox at the next lifecycle
+  tick.
 
 ## Configuration
 

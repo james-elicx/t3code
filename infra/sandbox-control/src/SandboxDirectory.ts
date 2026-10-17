@@ -14,6 +14,9 @@ import type { SandboxSummary } from "./ThreadSandbox.ts";
  * and no container. Clients list it like any sandbox, so the project is there
  * before anything runs, and a new thread's first message starts it.
  */
+/** How long a probe has before another may start. */
+const PROBE_RETRY_MS = 5 * 60 * 1000;
+
 export class SandboxDirectory extends DurableObject<Env> {
   /** Slot allocation runs one at a time, so a project never gets two. */
   private slots: Promise<unknown> = Promise.resolve();
@@ -41,9 +44,9 @@ export class SandboxDirectory extends DurableObject<Env> {
   }
 
   /**
-   * The last server config a client read from a running sandbox. Every
-   * sandbox runs the same image, so clients offer its providers and models
-   * for one that has not started.
+   * The server config of the last sandbox that booted. Every sandbox runs the
+   * same image, so clients offer its providers and models in one that has not
+   * started.
    */
   async serverConfig(): Promise<string | null> {
     return (await this.ctx.storage.get<string>("serverConfig")) ?? null;
@@ -51,6 +54,24 @@ export class SandboxDirectory extends DurableObject<Env> {
 
   async setServerConfig(json: string): Promise<void> {
     await this.ctx.storage.put("serverConfig", json);
+  }
+
+  /**
+   * Before any sandbox has booted there is no server config, so a probe boots
+   * the image once without a repository to read one. Retried after a while if
+   * it fails; every boot after it refreshes the config, as when the image changes.
+   */
+  async ensureServerConfig(): Promise<void> {
+    if (await this.serverConfig()) return;
+    const startedAt = (await this.ctx.storage.get<number>("probeStartedAt")) ?? 0;
+    if (Date.now() - startedAt < PROBE_RETRY_MS) return;
+    await this.ctx.storage.put("probeStartedAt", Date.now());
+    const id = `probe-${Date.now().toString(36)}`;
+    await this.exports().ThreadSandbox.getByName(id).probe(id);
+  }
+
+  async forgetServerConfig(): Promise<void> {
+    await this.ctx.storage.delete(["serverConfig", "probeStartedAt"]);
   }
 
   /**

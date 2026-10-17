@@ -57,19 +57,25 @@ fi
 
 # The session repo, cloned through the egress broker. Work happens on the
 # sandbox's own branch, the only one it may push; a sandbox whose snapshot is
-# gone picks up from what it pushed there.
-: "${T3_SANDBOX_REPO:?T3_SANDBOX_REPO is required (owner/name)}"
-CHECKOUT="/workspace/${T3_SANDBOX_REPO#*/}"
-if [ ! -d "$CHECKOUT/.git" ]; then
-  if ! git clone --quiet "https://github.com/$T3_SANDBOX_REPO.git" "$CHECKOUT"; then
-    echo "error: could not clone $T3_SANDBOX_REPO" >&2
-    exit 1
-  fi
-  if [ -n "${T3_SANDBOX_BRANCH:-}" ]; then
-    if git -C "$CHECKOUT" rev-parse --quiet --verify "refs/remotes/origin/$T3_SANDBOX_BRANCH" >/dev/null; then
-      git -C "$CHECKOUT" checkout --quiet "$T3_SANDBOX_BRANCH"
-    else
-      git -C "$CHECKOUT" checkout --quiet -b "$T3_SANDBOX_BRANCH"
+# gone picks up from what it pushed there. A probe (booted only to read T3's
+# server config) has no repository.
+if [ -n "${T3_SANDBOX_PROBE:-}" ]; then
+  CHECKOUT=/workspace/probe
+  mkdir -p "$CHECKOUT"
+else
+  : "${T3_SANDBOX_REPO:?T3_SANDBOX_REPO is required (owner/name)}"
+  CHECKOUT="/workspace/${T3_SANDBOX_REPO#*/}"
+  if [ ! -d "$CHECKOUT/.git" ]; then
+    if ! git clone --quiet "https://github.com/$T3_SANDBOX_REPO.git" "$CHECKOUT"; then
+      echo "error: could not clone $T3_SANDBOX_REPO" >&2
+      exit 1
+    fi
+    if [ -n "${T3_SANDBOX_BRANCH:-}" ]; then
+      if git -C "$CHECKOUT" rev-parse --quiet --verify "refs/remotes/origin/$T3_SANDBOX_BRANCH" >/dev/null; then
+        git -C "$CHECKOUT" checkout --quiet "$T3_SANDBOX_BRANCH"
+      else
+        git -C "$CHECKOUT" checkout --quiet -b "$T3_SANDBOX_BRANCH"
+      fi
     fi
   fi
 fi

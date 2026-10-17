@@ -6,6 +6,7 @@
 
 /** The fields of a thread in `GET /api/orchestration/shell` this rule reads. */
 export interface ShellThread {
+  readonly id: string;
   readonly settledAt: string | null;
   readonly activeRunId: string | null;
   readonly archivedAt: string | null;
@@ -14,6 +15,8 @@ export interface ShellThread {
 
 export interface LifecycleInput {
   readonly threads: ReadonlyArray<ShellThread>;
+  /** The thread the sandbox was started for, once T3 has it; null before. */
+  readonly threadId: string | null;
   /** Last `/wake` call: a client has the sandbox's thread open. */
   readonly viewedAt: number;
   /** Last view or egress request. */
@@ -25,15 +28,20 @@ export interface LifecycleInput {
   readonly checkpointEveryMs: number;
 }
 
-export type LifecycleVerdict = "sleep" | "checkpoint" | "stay";
+export type LifecycleVerdict = "delete" | "sleep" | "checkpoint" | "stay";
 
 /**
- * A sandbox sleeps once no thread in it has work left (settled, no live run,
+ * A sandbox holds one thread, so it is deleted once that thread is. It sleeps
+ * once no thread in it has work left (settled, no live run,
  * no background tasks) and nobody has viewed it for `sleepAfterMs`. An awake
  * sandbox checkpoints every `checkpointEveryMs` while something happened since
  * its last save, so a host restart loses at most that much.
  */
 export function lifecycleVerdict(input: LifecycleInput): LifecycleVerdict {
+  // Deleted in T3 itself, by an agent or a client that went around the control plane.
+  if (input.threadId !== null && !input.threads.some((thread) => thread.id === input.threadId)) {
+    return "delete";
+  }
   const working = input.threads.some(
     (thread) =>
       thread.archivedAt === null &&
