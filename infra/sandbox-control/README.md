@@ -93,6 +93,12 @@ A sandbox keeps its disk until it is deleted, without running all the time:
   awake is restarted from its last save.
 - **Deleting** the sandbox deletes its R2 objects. Its snapshot cannot be deleted and expires.
 
+**Settings.** A new sandbox starts with the last T3 settings edited in any sandbox, from any client
+or by an agent. The lifecycle alarm notices the change in that sandbox's `settings.json` and stores
+it in `SandboxDirectory` as the template. Sandboxes that already exist keep their own settings.
+Before any edit, new sandboxes use `container/sandbox-settings.json`. Secrets are not in that file:
+T3 keeps them under `secrets/`.
+
 Locally `SLEEP_AFTER_MS` is 20 seconds and the alarm runs every 5, so the proofs can watch it.
 
 ## The web client in sandbox mode

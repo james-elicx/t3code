@@ -26,9 +26,15 @@ fi
 
 # Every step below is skipped when a restore or snapshot already did it.
 T3_HOME="${T3CODE_HOME:-/t3home}"
+# A new sandbox starts with the control plane's settings template (the last
+# settings edited in any sandbox), or the image's defaults before there is one.
 if [ ! -f "$T3_HOME/userdata/settings.json" ]; then
   mkdir -p "$T3_HOME/userdata"
-  cp /opt/t3/sandbox-settings.json "$T3_HOME/userdata/settings.json"
+  if [ -n "${T3_SANDBOX_SETTINGS:-}" ]; then
+    printf '%s' "$T3_SANDBOX_SETTINGS" > "$T3_HOME/userdata/settings.json"
+  else
+    cp /opt/t3/sandbox-settings.json "$T3_HOME/userdata/settings.json"
+  fi
 fi
 
 # The session repo, cloned through the egress broker. Work happens on the

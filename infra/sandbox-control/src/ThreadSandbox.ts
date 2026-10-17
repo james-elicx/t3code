@@ -16,6 +16,7 @@ import { bridgeWebSocket } from "./wsBridge.ts";
 const T3_PORT = 3773;
 const T3_BIN = ["node", "/opt/t3/dist/bin.mjs"];
 const T3_HOME = "/t3home";
+const SETTINGS_PATH = `${T3_HOME}/userdata/settings.json`;
 const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 /** The entrypoint waits for this file while the control plane restores the T3 home. */
 const RESTORED_MARKER = "/run/t3-sandbox-restored";
@@ -67,6 +68,8 @@ interface SandboxRecord {
   viewedAt: string;
   pullRequests: RecordedPullRequest[];
   environmentId?: string;
+  /** The settings template when this sandbox was created; written on its first boot. */
+  readonly settings?: string;
   /** Saved and destroyed; only `/wake` or a create boots it again. */
   asleep?: boolean;
   /** The T3 home (T3's database, settings, Claude's transcripts) in R2. */
@@ -121,6 +124,8 @@ export class ThreadSandbox extends DurableObject<Env> {
   /** True once the T3 server in the current container has answered. */
   private t3Ready = false;
   private phase: "restoring" | "saving" | null = null;
+  /** settings.json as first read in the current container; changes from it become the template. */
+  private settingsBaseline: string | null = null;
   private destroyed = false;
   private lastActivityWrite = 0;
 
@@ -149,6 +154,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     const instance = input.instance ?? "standard-1";
     if (!SANDBOX_INSTANCES.includes(instance)) throw new Error(`Unknown instance ${instance}.`);
     const now = new Date().toISOString();
+    const settings = await directory(controlPlane(this.ctx)).settingsTemplate();
     const record: SandboxRecord = {
       threadId: input.threadId,
       title: input.title ?? input.threadId,
@@ -160,6 +166,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       lastActivityAt: now,
       viewedAt: now,
       pullRequests: [],
+      ...(settings ? { settings } : {}),
     };
     await this.save(record);
     // Boot outside this request; callers poll the summary.
@@ -367,8 +374,32 @@ export class ThreadSandbox extends DurableObject<Env> {
       sleepAfterMs: Number(this.env.SLEEP_AFTER_MS),
       checkpointEveryMs: CHECKPOINT_EVERY_MS,
     });
-    if (verdict === "sleep") await this.sleep();
-    else if (verdict === "checkpoint") await this.checkpoint(record);
+    if (verdict === "sleep") {
+      await this.sleep();
+      return;
+    }
+    await this.captureSettings();
+    if (verdict === "checkpoint") await this.checkpoint(record);
+  }
+
+  /**
+   * Settings edited in this sandbox, from any client or by an agent, become the
+   * template new sandboxes start with. Sandboxes that exist keep their own.
+   */
+  private async captureSettings() {
+    const output = await (await this.container.exec(["cat", SETTINGS_PATH])).output();
+    if (output.exitCode !== 0) return;
+    const current = new TextDecoder().decode(output.stdout);
+    try {
+      JSON.parse(current);
+    } catch {
+      return; // Read mid-write; the next tick sees the whole file.
+    }
+    const baseline = this.settingsBaseline;
+    this.settingsBaseline = current;
+    if (baseline !== null && current !== baseline) {
+      await directory(controlPlane(this.ctx)).setSettingsTemplate(current);
+    }
   }
 
   /**
@@ -423,6 +454,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     const startedHere = !this.container.running;
     if (startedHere) {
       this.t3Ready = false;
+      this.settingsBaseline = null;
       const snapshot = this.usableSnapshot(record);
       const restoreToken = randomId();
       await this.intercept(record);
@@ -432,7 +464,11 @@ export class ThreadSandbox extends DurableObject<Env> {
         instance: record.instance,
         env: {
           ...this.sandboxEnv(record),
-          ...(record.backup ? { T3_SANDBOX_RESTORE: restoreToken } : {}),
+          ...(record.backup
+            ? { T3_SANDBOX_RESTORE: restoreToken }
+            : record.settings
+              ? { T3_SANDBOX_SETTINGS: record.settings }
+              : {}),
         },
         labels: { thread: record.threadId.slice(0, 64) },
       });

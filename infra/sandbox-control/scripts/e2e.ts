@@ -352,6 +352,48 @@ async function main() {
     egress.stdout,
   );
 
+  // --- Settings template ----------------------------------------------------
+  // An edit in this sandbox (here straight to the file T3 watches; the Settings UI
+  // writes the same file) becomes what the next new sandbox starts with.
+  const flipped = await sh(
+    `node -e 'const fs=require("fs"),f="/t3home/userdata/settings.json",s=JSON.parse(fs.readFileSync(f));` +
+      `s.defaultAutoPull=!s.defaultAutoPull;fs.writeFileSync(f,JSON.stringify(s));console.log(s.defaultAutoPull)'`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 8000)); // a lifecycle tick or two
+  const second = `${threadId}-b`;
+  try {
+    await api("", {
+      method: "POST",
+      body: JSON.stringify({ threadId: second, repo: "acme/demo" }),
+    });
+    const secondStarted = Date.now();
+    let secondSummary: { status: string; lastError: string | null };
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      secondSummary = await api(`/${second}`);
+      if (secondSummary.lastError)
+        throw new Error(`second boot failed: ${secondSummary.lastError}`);
+      if (Date.now() - secondStarted > 240_000) throw new Error("second sandbox did not start");
+    } while (secondSummary.status !== "running");
+    const inherited = (await api(`/${second}/exec`, {
+      method: "POST",
+      body: JSON.stringify({
+        argv: [
+          "node",
+          "-p",
+          'JSON.parse(require("fs").readFileSync("/t3home/userdata/settings.json")).defaultAutoPull',
+        ],
+      }),
+    })) as { stdout: string };
+    check(
+      "settings edited in one sandbox are what a new sandbox starts with",
+      flipped.stdout.trim() !== "" && inherited.stdout.trim() === flipped.stdout.trim(),
+      `defaultAutoPull set to ${flipped.stdout.trim()} in ${threadId}; ${second} started with ${inherited.stdout.trim()}`,
+    );
+  } finally {
+    await api(`/${second}`, { method: "DELETE" }).catch(() => {});
+  }
+
   // --- Sleep and wake ------------------------------------------------------
   clearInterval(viewing);
   const before = await sh(

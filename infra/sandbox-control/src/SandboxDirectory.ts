@@ -18,6 +18,15 @@ export class SandboxDirectory extends DurableObject<Env> {
     await this.ctx.storage.delete(`sandbox:${threadId}`);
   }
 
+  /** The settings.json new sandboxes start with: the last one edited in any sandbox. */
+  async settingsTemplate(): Promise<string | null> {
+    return (await this.ctx.storage.get<string>("settingsTemplate")) ?? null;
+  }
+
+  async setSettingsTemplate(json: string): Promise<void> {
+    await this.ctx.storage.put("settingsTemplate", json);
+  }
+
   async list(): Promise<SandboxSummary[]> {
     const entries = await this.ctx.storage.list<SandboxSummary>({ prefix: "sandbox:" });
     return [...entries.values()].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
