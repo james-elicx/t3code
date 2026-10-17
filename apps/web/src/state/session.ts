@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
 import {
+  AuthOrchestrationOperateScope,
   type AuthEnvironmentScope,
   type AuthSessionState,
   type EnvironmentId,
@@ -12,10 +13,19 @@ import { AsyncResult, Atom } from "effect/reactivity";
 
 import { connectionAtomRuntime } from "../connection/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { presumedOperateEnvironmentsAtom } from "../sandboxes/presumedScopes";
 
 export const environmentSession = createEnvironmentSessionAtoms(connectionAtomRuntime);
 
 const EMPTY_SESSION_STATE_ATOM = Atom.make(AsyncResult.initial<AuthSessionState>());
+
+/** A project's unstarted sandbox takes a draft's first message before it connects. */
+const presumes = (
+  presumed: ReadonlySet<EnvironmentId>,
+  environmentId: EnvironmentId | null,
+  scope: AuthEnvironmentScope,
+) =>
+  scope === AuthOrchestrationOperateScope && environmentId !== null && presumed.has(environmentId);
 
 /** Uses the selected environment's grant, including cached scopes during a refresh. */
 export function useEnvironmentScope(
@@ -27,7 +37,8 @@ export function useEnvironmentScope(
       ? EMPTY_SESSION_STATE_ATOM
       : environmentSession.sessionStateAtom(environmentId),
   );
-  return sessionHasScope(result, scope);
+  const presumed = useAtomValue(presumedOperateEnvironmentsAtom);
+  return sessionHasScope(result, scope) || presumes(presumed, environmentId, scope);
 }
 
 function sessionHasScope(
@@ -49,7 +60,10 @@ export function useEnvironmentsWithScope(
         const ids = new Set<EnvironmentId>();
         for (const { environmentId } of environments) {
           const result = get(environmentSession.sessionStateAtom(environmentId));
-          if (sessionHasScope(result, scope)) {
+          if (
+            sessionHasScope(result, scope) ||
+            presumes(get(presumedOperateEnvironmentsAtom), environmentId, scope)
+          ) {
             ids.add(environmentId);
           }
         }
@@ -64,9 +78,11 @@ export function readEnvironmentScope(
   environmentId: EnvironmentId,
   scope: AuthEnvironmentScope,
 ): boolean {
-  return sessionHasScope(
-    appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId)),
-    scope,
+  return (
+    sessionHasScope(
+      appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId)),
+      scope,
+    ) || presumes(appAtomRegistry.get(presumedOperateEnvironmentsAtom), environmentId, scope)
   );
 }
 

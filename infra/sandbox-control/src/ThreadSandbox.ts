@@ -74,6 +74,9 @@ export interface StartSandboxInput {
 
 export type CreateSandboxInput = AllocateSandboxInput & StartSandboxInput;
 
+/** A first boot: the container starting, the clone and T3 starting, then the thread's launch. */
+export type SetupStep = "container" | "clone" | "launch";
+
 /** What clients show for a sandbox's thread before its T3 server first answers. */
 export interface PendingThread {
   readonly threadId: string;
@@ -147,6 +150,8 @@ export interface SandboxSummary {
   readonly lastActivityAt: string;
   readonly lastError: string | null;
   readonly ranAt: string | null;
+  /** Where a sandbox that has never run is in its first boot. */
+  readonly setupStep: SetupStep | null;
   /** Its first thread, until the T3 server has it. */
   readonly pendingThread: PendingThread | null;
 }
@@ -173,6 +178,8 @@ export class ThreadSandbox extends DurableObject<Env> {
   /** True once the T3 server in the current container has answered. */
   private t3Ready = false;
   private phase: "restoring" | "saving" | null = null;
+  /** Where a first boot is, for the client's setup card. */
+  private step: SetupStep | null = null;
   /** settings.json when T3 came up in this container; changes from it become the template. */
   private settingsBaseline: string | null = null;
   /** The project's config when T3 came up; changes from it carry to later sandboxes. */
@@ -592,6 +599,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.projectBaseline = null;
       const snapshot = this.usableSnapshot(record);
       const preparedToken = randomId();
+      if (!record.ranAt) await this.setStep(record, "container");
       await this.intercept(record);
       this.container.start({
         ...(snapshot ? { containerSnapshot: { id: snapshot } } : { image: this.image() }),
@@ -624,6 +632,7 @@ export class ThreadSandbox extends DurableObject<Env> {
         if (record.backup) await this.restoreHome(record, record.backup);
         await this.mountShared();
         await this.run(["sh", "-c", `printf %s "$0" > ${PREPARED_MARKER}`, preparedToken]);
+        if (!record.ranAt) await this.setStep(record, "clone");
       } finally {
         this.phase = null;
       }
@@ -641,13 +650,20 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (startedHere || this.settingsBaseline === null) {
       this.settingsBaseline = await this.readSettings();
     }
+    if (!record.ranAt) await this.setStep(record, "launch");
     this.projectBaseline = await this.ensureProject(record, token);
     await this.launchPending(record, token);
+    this.step = null;
     record.environmentId = descriptor.environmentId;
     record.ranAt ??= new Date().toISOString();
     this.t3Ready = true;
     await this.save(record);
     return token;
+  }
+
+  private async setStep(record: SandboxRecord, step: SetupStep) {
+    this.step = step;
+    await this.save(record);
   }
 
   /**
@@ -926,6 +942,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       lastActivityAt: record.lastActivityAt,
       lastError: record.lastError ?? null,
       ranAt: record.ranAt ?? null,
+      setupStep: record.ranAt || !this.booting ? null : this.step,
       pendingThread:
         record.launch && !record.launchedAt
           ? {

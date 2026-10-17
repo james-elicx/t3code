@@ -3,11 +3,15 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   BearerConnectionTarget,
-  type PlatformConnectionRegistration,
 } from "@t3tools/client-runtime/connection";
-import { EnvironmentId } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
+import {
+  EnvironmentId,
+  type ModelSelection,
+  type OrchestrationMessageContext,
+  type ProjectScript,
+  type ProviderInteractionMode,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 
@@ -22,10 +26,31 @@ import { randomUUID } from "../lib/utils";
  */
 
 /**
- * `starting` covers the container booting, the clone and T3 starting;
- * `restoring` is its T3 home coming back; `saving` precedes `asleep`.
+ * `unstarted` is a project's next sandbox, with no container until a thread's
+ * first message starts it; `starting` covers the container booting, the clone
+ * and T3 starting; `restoring` is its T3 home coming back; `saving` precedes
+ * `asleep`.
  */
-export type SandboxStatus = "asleep" | "starting" | "restoring" | "saving" | "running";
+export type SandboxStatus =
+  | "unstarted"
+  | "asleep"
+  | "starting"
+  | "restoring"
+  | "saving"
+  | "running";
+
+/** Where a sandbox's first boot is. */
+export type SandboxSetupStep = "container" | "clone" | "launch";
+
+/** The thread a started sandbox launches once its T3 server is up. */
+export interface SandboxPendingThread {
+  readonly threadId: string;
+  readonly title: string;
+  readonly createdAt: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+}
 
 /** Sizes a sandbox may ask for. One today; the toggle lists each. */
 export const SANDBOX_INSTANCES = ["standard-1"] as const;
@@ -43,11 +68,40 @@ export interface SandboxEntry {
   readonly instance: SandboxInstance;
   readonly environmentId: string | null;
   readonly lastError: string | null;
+  /** When its T3 server first answered; until then clients show what the control plane knows. */
+  readonly ranAt: string | null;
+  readonly setupStep: SandboxSetupStep | null;
+  readonly pendingThread: SandboxPendingThread | null;
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
 }
 
-const DIRECTORY_POLL_INTERVAL = "3 seconds";
+/** A GitHub repository the control plane keeps as a project, with its editable config. */
+export interface SandboxProjectEntry {
+  readonly repo: string;
+  readonly createdAt: string;
+  readonly config: {
+    readonly title: string;
+    readonly defaultModelSelection: ModelSelection | null;
+    readonly scripts: ReadonlyArray<ProjectScript>;
+  };
+}
+
+/** A thread's first message, as the control plane launches it in a new sandbox. */
+export interface SandboxLaunch {
+  readonly commandId: string;
+  readonly threadId: string;
+  readonly title: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly createdAt: string;
+  readonly initialMessage: {
+    readonly messageId: string;
+    readonly text: string;
+    readonly context?: OrchestrationMessageContext;
+  };
+}
 
 /**
  * The control plane adds each sandbox's own credential to every request it
@@ -72,12 +126,20 @@ export function newSandboxId(): string {
   return `t-${randomUUID().replaceAll("-", "").slice(0, 10)}`;
 }
 
-/** The environment a booted sandbox serves, or null until its T3 server first answers. */
+/**
+ * The environment a sandbox serves. A project's unstarted sandbox has one too,
+ * fixed by the control plane, so its project lists before anything runs. Its
+ * label changes when a thread starts it, which makes the client re-read the
+ * environment's cached shell (see registrations.ts).
+ */
 export function sandboxRegistration(entry: SandboxEntry): BearerConnectionRegistration | null {
   if (entry.environmentId === null) return null;
   const environmentId = EnvironmentId.make(entry.environmentId);
   const connectionId = `sandbox:${entry.threadId}`;
-  const label = `${entry.title} · ${entry.threadId}`;
+  const label =
+    entry.status === "unstarted"
+      ? `New sandbox · ${entry.repo}`
+      : `${entry.title} · ${entry.threadId}`;
   return new BearerConnectionRegistration({
     target: new BearerConnectionTarget({ environmentId, label, connectionId }),
     profile: new BearerConnectionProfile({
@@ -91,12 +153,41 @@ export function sandboxRegistration(entry: SandboxEntry): BearerConnectionRegist
   });
 }
 
-interface SandboxDirectoryState {
+export interface SandboxDirectoryState {
   readonly entries: ReadonlyArray<SandboxEntry>;
+  readonly projects: ReadonlyArray<SandboxProjectEntry>;
+  /** False until the first read, so nothing mistakes "not read yet" for "none". */
+  readonly loaded: boolean;
 }
 
 /** The last directory read, for telling sandbox environments apart in the UI. */
-export const useSandboxDirectoryStore = create<SandboxDirectoryState>(() => ({ entries: [] }));
+export const useSandboxDirectoryStore = create<SandboxDirectoryState>(() => ({
+  entries: [],
+  projects: [],
+  loaded: false,
+}));
+
+const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** The project's unstarted sandbox: where its next thread starts. */
+export function findSlotForRepo(
+  entries: ReadonlyArray<SandboxEntry>,
+  repo: string,
+): SandboxEntry | null {
+  return (
+    entries.find(
+      (entry) =>
+        entry.status === "unstarted" && entry.environmentId !== null && sameRepo(entry.repo, repo),
+    ) ?? null
+  );
+}
+
+export function findSandboxProject(
+  projects: ReadonlyArray<SandboxProjectEntry>,
+  repo: string,
+): SandboxProjectEntry | null {
+  return projects.find((project) => sameRepo(project.repo, repo)) ?? null;
+}
 
 export function findSandboxForEnvironment(
   entries: ReadonlyArray<SandboxEntry>,
@@ -132,19 +223,57 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function listSandboxes(): Promise<ReadonlyArray<SandboxEntry>> {
-  const entries = (await request<{ sandboxes: SandboxEntry[] }>("")).sandboxes;
-  useSandboxDirectoryStore.setState({ entries });
-  return entries;
+  const { sandboxes, projects } = await request<{
+    sandboxes: SandboxEntry[];
+    projects: SandboxProjectEntry[];
+  }>("");
+  useSandboxDirectoryStore.setState({ entries: sandboxes, projects, loaded: true });
+  return sandboxes;
+}
+
+/** Puts a summary the control plane just returned into the store, ahead of the next read. */
+function storeEntry(entry: SandboxEntry) {
+  useSandboxDirectoryStore.setState(({ entries }) => ({
+    entries: entries.some((candidate) => candidate.threadId === entry.threadId)
+      ? entries.map((candidate) => (candidate.threadId === entry.threadId ? entry : candidate))
+      : [entry, ...entries],
+  }));
 }
 
 export const getSandbox = (id: string) => request<SandboxEntry>(`/${id}`);
 
-export const createSandbox = (input: {
-  threadId: string;
-  repo: string;
-  title: string;
-  instance?: SandboxInstance;
-}) => request<SandboxEntry>("", { method: "POST", body: JSON.stringify(input) });
+/**
+ * Starts a project's unstarted sandbox, with the thread its first message
+ * begins, or with none to have its models before any thread.
+ */
+export async function startSandbox(
+  id: string,
+  input: { readonly launch?: SandboxLaunch; readonly instance?: SandboxInstance },
+): Promise<SandboxEntry> {
+  const entry = await request<SandboxEntry>(`/${id}/start`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  storeEntry(entry);
+  // The project has a fresh unstarted sandbox for its next thread now.
+  void listSandboxes().catch(() => undefined);
+  return entry;
+}
+
+/** Adds a GitHub repository as a project, with an unstarted sandbox for its first thread. */
+export async function addSandboxProject(repo: string): Promise<void> {
+  await request<SandboxProjectEntry>("/projects", {
+    method: "POST",
+    body: JSON.stringify({ repo }),
+  });
+  await listSandboxes();
+}
+
+/** Forgets the project and its unstarted sandbox; sandboxes holding threads stay. */
+export async function removeSandboxProject(repo: string): Promise<void> {
+  await request<null>(`/projects/${repo}`, { method: "DELETE" });
+  await listSandboxes();
+}
 
 /**
  * Marks the sandbox as viewed, booting it if it was asleep. An open thread
@@ -158,31 +287,3 @@ export async function deleteSandbox(id: string): Promise<void> {
     entries: entries.filter((entry) => entry.threadId !== id),
   }));
 }
-
-/**
- * The platform environments the directory lists, re-read on an interval. A
- * failed read emits nothing, so a network blip does not drop every sandbox.
- */
-export const sandboxRegistrations: Stream.Stream<ReadonlyArray<PlatformConnectionRegistration>> =
-  Stream.tick(DIRECTORY_POLL_INTERVAL).pipe(
-    Stream.mapEffect(() =>
-      Effect.tryPromise(listSandboxes).pipe(
-        Effect.map((entries): ReadonlyArray<PlatformConnectionRegistration> | undefined =>
-          entries.flatMap((entry) => {
-            const registration = sandboxRegistration(entry);
-            return registration === null ? [] : [registration];
-          }),
-        ),
-        Effect.tapError((error) =>
-          Effect.logWarning("Could not read the sandbox directory.", { error }),
-        ),
-        Effect.orElseSucceed(() => undefined),
-      ),
-    ),
-    Stream.filter(
-      (
-        registrations: ReadonlyArray<PlatformConnectionRegistration> | undefined,
-      ): registrations is ReadonlyArray<PlatformConnectionRegistration> =>
-        registrations !== undefined,
-    ),
-  );

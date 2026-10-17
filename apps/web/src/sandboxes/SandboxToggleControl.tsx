@@ -13,72 +13,81 @@ import {
   SelectPopup,
   SelectValue,
 } from "../components/ui/select";
+import { toastManager } from "../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import type { DraftId } from "../composerDraftStore";
-import { SANDBOX_INSTANCES, type SandboxInstance } from "./directory";
-import { setSandboxChoice } from "./toggle";
+import { addSandboxProjectRef } from "./addProject";
+import { moveDraft } from "./toggle";
 import { useSandboxToggle } from "./useSandboxToggle";
 
-const OFF = "off";
+const SANDBOX = "sandbox";
+const MACHINE = "machine";
 
-function instanceLabel(instance: SandboxInstance) {
-  return SANDBOX_INSTANCES.length === 1 ? "Sandbox" : `Sandbox · ${instance}`;
+/** Adds the repository as a sandbox project, then moves the draft into its unstarted sandbox. */
+async function moveDraftToNewSandboxProject(draftId: DraftId, repo: string) {
+  try {
+    moveDraft(draftId, await addSandboxProjectRef(repo));
+  } catch (error) {
+    toastManager.add({
+      type: "error",
+      title: `Could not add ${repo} for sandboxes`,
+      description: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /**
- * The composer's sandbox toggle for a draft: off sends the first message to
- * the machine the draft is on; a size starts a new sandbox for the project's
- * repository. Renders nothing outside sandbox mode.
+ * The composer's sandbox toggle for a draft: it moves the draft between the
+ * project's unstarted sandbox, which its first message starts, and the same
+ * repository on one of your machines. Renders nothing outside sandbox mode.
  */
 export const SandboxToggleControl = memo(function SandboxToggleControl(props: {
   draftId: DraftId;
   projectRef: ScopedProjectRef;
 }) {
-  const { toggle, choice, instance } = useSandboxToggle(props.draftId, props.projectRef);
+  const toggle = useSandboxToggle(props.draftId, props.projectRef);
   const composerFloatingLayerProps = useComposerMenuProps();
   const items = useMemo(
     () => [
-      { value: OFF, label: "No sandbox" },
-      ...SANDBOX_INSTANCES.map((value) => ({ value, label: instanceLabel(value) })),
+      { value: SANDBOX, label: "New sandbox" },
+      { value: MACHINE, label: "Your machine" },
     ],
     [],
   );
 
   if (toggle.kind === "hidden") return null;
-  if (toggle.kind !== "choose") {
+  if (toggle.kind === "unavailable") {
     const row = (
       <span
         className="inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-xs sm:h-6"
         data-composer-context-control
       >
-        <BoxIcon className="size-3" />
-        <ComposerContextLabel>
-          {toggle.kind === "locked" && instance ? instanceLabel(instance) : "No sandbox"}
-        </ComposerContextLabel>
+        <LaptopIcon className="size-3" />
+        <ComposerContextLabel>No sandbox</ComposerContextLabel>
       </span>
     );
     return (
       <Tooltip>
         <TooltipTrigger render={row} />
-        <TooltipPopup>
-          {toggle.kind === "locked"
-            ? `A sandbox holds one thread, so this one starts a new sandbox for ${toggle.repo}.`
-            : toggle.reason}
-        </TooltipPopup>
+        <TooltipPopup>{toggle.reason}</TooltipPopup>
       </Tooltip>
     );
   }
 
+  const onValueChange = (value: string | null) => {
+    if (value === SANDBOX && !toggle.on) {
+      if (toggle.sandboxProjectRef) moveDraft(props.draftId, toggle.sandboxProjectRef);
+      else void moveDraftToNewSandboxProject(props.draftId, toggle.repo);
+    } else if (value === MACHINE && toggle.on && toggle.machineProjectRef) {
+      moveDraft(props.draftId, toggle.machineProjectRef);
+    }
+  };
+
   return (
     <Select
       modal={false}
-      value={choice ?? OFF}
-      onValueChange={(value: string | null) =>
-        setSandboxChoice(
-          props.draftId,
-          SANDBOX_INSTANCES.find((candidate) => candidate === value) ?? null,
-        )
-      }
+      value={toggle.on ? SANDBOX : MACHINE}
+      onValueChange={onValueChange}
       items={items}
     >
       <Tooltip>
@@ -92,34 +101,32 @@ export const SandboxToggleControl = memo(function SandboxToggleControl(props: {
             />
           }
         >
-          {choice ? <BoxIcon className="size-3" /> : <LaptopIcon className="size-3" />}
+          {toggle.on ? <BoxIcon className="size-3" /> : <LaptopIcon className="size-3" />}
           <ComposerContextLabel>
             <SelectValue />
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup>
-          {choice
+          {toggle.on
             ? `The first message starts a new sandbox for ${toggle.repo}.`
-            : "The thread runs on this machine."}
+            : "The thread runs on your machine."}
         </TooltipPopup>
       </Tooltip>
       <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
         <SelectGroup>
           <SelectGroupLabel>Start in</SelectGroupLabel>
-          <SelectItem value={OFF}>
+          <SelectItem value={SANDBOX}>
             <span className="inline-flex items-center gap-1.5">
-              <LaptopIcon className="size-3" />
-              No sandbox
+              <BoxIcon className="size-3" />
+              New sandbox
             </span>
           </SelectItem>
-          {SANDBOX_INSTANCES.map((value) => (
-            <SelectItem key={value} value={value}>
-              <span className="inline-flex items-center gap-1.5">
-                <BoxIcon className="size-3" />
-                {instanceLabel(value)}
-              </span>
-            </SelectItem>
-          ))}
+          <SelectItem value={MACHINE} disabled={toggle.on && toggle.machineProjectRef === null}>
+            <span className="inline-flex items-center gap-1.5">
+              <LaptopIcon className="size-3" />
+              Your machine
+            </span>
+          </SelectItem>
         </SelectGroup>
       </SelectPopup>
     </Select>

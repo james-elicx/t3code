@@ -50,7 +50,8 @@ import {
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
-import { isSandboxMode, sandboxRegistrations } from "../sandboxes/directory";
+import { isSandboxMode } from "../sandboxes/directory";
+import { sandboxRegistrations } from "../sandboxes/registrations";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
@@ -571,7 +572,9 @@ const layerPlatformConnectionSource = Layer.effect(
     if (isHostedStaticApp() || isLocalEnvironmentDisabled()) {
       return PlatformConnectionSource.PlatformConnectionSource.of({
         // The sandbox control plane's hosted client lists one environment per sandbox.
-        registrations: isSandboxMode() ? sandboxRegistrations : Stream.empty,
+        registrations: isSandboxMode()
+          ? sandboxRegistrations(yield* Persistence.EnvironmentCacheStore)
+          : Stream.empty,
       });
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
@@ -781,13 +784,17 @@ type ConnectionPlatformLayerSource =
 export const layer: Layer.Layer<
   Layer.Success<ConnectionPlatformLayerSource>,
   Layer.Error<ConnectionPlatformLayerSource>,
-  Layer.Services<ConnectionPlatformLayerSource>
+  // The connection source reads the cache store that storage provides.
+  Exclude<
+    Layer.Services<ConnectionPlatformLayerSource>,
+    Layer.Success<typeof ConnectionStorage.layer>
+  >
 > = Layer.mergeAll(
-  ConnectionStorage.layer,
+  // Sandbox environments seed their cache before they register.
+  layerPlatformConnectionSource.pipe(Layer.provideMerge(ConnectionStorage.layer)),
   layerConnectivity,
   layerWakeups,
   layerCapabilities,
-  layerPlatformConnectionSource,
   layerEnvironmentOwnedDataCleanup,
   layerRpcRequestObserver,
 );

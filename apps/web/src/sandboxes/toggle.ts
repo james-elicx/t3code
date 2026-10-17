@@ -1,20 +1,34 @@
-import { repositoryGroupingKeyOf, type RepositoryIdentity } from "@t3tools/contracts";
-import { create } from "zustand";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  EnvironmentId,
+  ProjectId,
+  repositoryGroupingKeyOf,
+  type RepositoryIdentity,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 
-import type { DraftId } from "../composerDraftStore";
-import { SANDBOX_INSTANCES, type SandboxInstance } from "./directory";
+import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import type { SandboxEntry } from "./directory";
 
 /**
- * The composer's sandbox toggle: whether a draft's first message starts a new
- * sandbox for its project's repository, or goes to the machine it is on.
+ * The composer's sandbox toggle. On, the draft is in its project's unstarted
+ * sandbox, so its first message starts that sandbox; off, it is on one of
+ * your machines. Either way the draft is an ordinary draft on an ordinary
+ * environment, and the toggle only moves it between them.
  */
 export type SandboxToggle =
-  /** Not offered: a started thread, or a draft already in a sandbox made for it. */
+  /** Not a draft, or not in sandbox mode. */
   | { readonly kind: "hidden" }
   | { readonly kind: "unavailable"; readonly reason: string }
-  | { readonly kind: "choose"; readonly repo: string }
-  /** The draft is in a sandbox that has its thread, so it can only start another. */
-  | { readonly kind: "locked"; readonly repo: string };
+  | {
+      readonly kind: "choose";
+      readonly repo: string;
+      readonly on: boolean;
+      /** Where "on" moves the draft: the project's unstarted sandbox, once the control plane has one. */
+      readonly sandboxProjectRef: ScopedProjectRef | null;
+      /** Where "off" moves it: the same repository on one of your machines, if any has it. */
+      readonly machineProjectRef: ScopedProjectRef | null;
+    };
 
 const GITHUB_REPOSITORY_KEY = /^github\.com\/([\w.-]+)\/([\w.-]+)$/;
 
@@ -28,61 +42,74 @@ export function sandboxRepoOf(identity: RepositoryIdentity | null | undefined): 
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
+interface ProjectCandidate {
+  readonly environmentId: EnvironmentId;
+  readonly id: ProjectId;
+  readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+}
+
 export function resolveSandboxToggle(input: {
   readonly isDraft: boolean;
-  /** The repository of the sandbox the draft's environment is, if it is one. */
-  readonly sandboxRepo: string | null;
-  readonly sandboxHasThread: boolean;
-  readonly repositoryIdentity: RepositoryIdentity | null | undefined;
+  readonly project: ProjectCandidate | null;
+  readonly entries: ReadonlyArray<SandboxEntry>;
+  readonly projects: ReadonlyArray<ProjectCandidate>;
 }): SandboxToggle {
-  if (!input.isDraft) return { kind: "hidden" };
-  if (input.sandboxRepo !== null) {
-    // A sandbox holds one thread: an empty one takes this draft's.
-    return input.sandboxHasThread
-      ? { kind: "locked", repo: input.sandboxRepo }
-      : { kind: "hidden" };
+  const { project, entries } = input;
+  if (!input.isDraft || project === null) return { kind: "hidden" };
+  const repo = sandboxRepoOf(project.repositoryIdentity);
+  if (repo === null) {
+    return { kind: "unavailable", reason: "Sandboxes need a project with a GitHub remote." };
   }
-  const repo = sandboxRepoOf(input.repositoryIdentity);
-  return repo === null
-    ? { kind: "unavailable", reason: "Sandboxes need a project with a GitHub remote." }
-    : { kind: "choose", repo };
+  const isSandbox = (environmentId: EnvironmentId) =>
+    entries.some((entry) => entry.environmentId === environmentId);
+  const sameRepo = (candidate: ProjectCandidate) =>
+    sandboxRepoOf(candidate.repositoryIdentity)?.toLowerCase() === repo.toLowerCase();
+  const slot =
+    entries.find(
+      (entry) =>
+        entry.status === "unstarted" &&
+        entry.environmentId !== null &&
+        entry.repo.toLowerCase() === repo.toLowerCase(),
+    ) ?? null;
+  const machine = input.projects.find(
+    (candidate) => !isSandbox(candidate.environmentId) && sameRepo(candidate),
+  );
+  return {
+    kind: "choose",
+    repo,
+    on: isSandbox(project.environmentId),
+    sandboxProjectRef: slot
+      ? scopeProjectRef(
+          EnvironmentId.make(slot.environmentId ?? ""),
+          ProjectId.make(slot.projectId),
+        )
+      : null,
+    machineProjectRef: machine ? scopeProjectRef(machine.environmentId, machine.id) : null,
+  };
 }
 
-/** The size the draft's first message starts a sandbox at, or null to send it where it is. */
-export function sandboxInstanceToStart(
+/**
+ * Where a draft belongs: a draft in a sandbox that holds another thread moves
+ * to the project's unstarted one, since a sandbox holds one thread.
+ */
+export function sandboxDraftTarget(
   toggle: SandboxToggle,
-  choice: SandboxInstance | null,
-): SandboxInstance | null {
-  if (toggle.kind === "locked") return choice ?? SANDBOX_INSTANCES[0];
-  return toggle.kind === "choose" ? choice : null;
+  sandboxHoldsAnotherThread: boolean,
+): ScopedProjectRef | null {
+  if (toggle.kind !== "choose" || !toggle.on || !sandboxHoldsAnotherThread) return null;
+  return toggle.sandboxProjectRef;
 }
 
-const LAST_CHOICE_KEY = "t3code:sandbox:last-choice";
-
-function parseChoice(value: string | null): SandboxInstance | null {
-  return SANDBOX_INSTANCES.find((instance) => instance === value) ?? null;
-}
-
-interface SandboxChoiceState {
-  /** Each draft's choice; a draft without one uses the last choice made. */
-  readonly byDraft: Readonly<Record<DraftId, SandboxInstance | null>>;
-  readonly last: SandboxInstance | null;
-}
-
-export const useSandboxChoiceStore = create<SandboxChoiceState>(() => ({
-  byDraft: {},
-  last:
-    typeof localStorage === "undefined" ? null : parseChoice(localStorage.getItem(LAST_CHOICE_KEY)),
-}));
-
-export function selectSandboxChoice(state: SandboxChoiceState, draftId: DraftId) {
-  return draftId in state.byDraft ? (state.byDraft[draftId] ?? null) : state.last;
-}
-
-export function setSandboxChoice(draftId: DraftId, choice: SandboxInstance | null): void {
-  localStorage.setItem(LAST_CHOICE_KEY, choice ?? "off");
-  useSandboxChoiceStore.setState(({ byDraft }) => ({
-    byDraft: { ...byDraft, [draftId]: choice },
-    last: choice,
-  }));
+/** Moves a draft to another environment's copy of its project, as "Run on" does. */
+export function moveDraft(draftId: DraftId, projectRef: ScopedProjectRef): void {
+  // A sandbox's checkout is its workspace; a worktree would live outside what it saves.
+  useComposerDraftStore.getState().setDraftThreadContext(draftId, {
+    projectRef,
+    branch: null,
+    worktreePath: null,
+    envMode: "local",
+    startFromOrigin: false,
+    environmentSelection: "manual",
+    loadBalancedEnvironmentId: null,
+  });
 }

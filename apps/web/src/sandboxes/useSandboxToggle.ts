@@ -1,46 +1,43 @@
 import type { ScopedProjectRef } from "@t3tools/contracts";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
-import type { DraftId } from "../composerDraftStore";
-import { useEnvironmentThreadRefs, useProject } from "../state/entities";
+import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useEnvironmentThreadRefs, useProject, useProjects } from "../state/entities";
 import { isSandboxMode, useSandboxDirectoryStore } from "./directory";
-import {
-  resolveSandboxToggle,
-  sandboxInstanceToStart,
-  selectSandboxChoice,
-  type SandboxToggle,
-  useSandboxChoiceStore,
-} from "./toggle";
+import { moveDraft, resolveSandboxToggle, sandboxDraftTarget, type SandboxToggle } from "./toggle";
 
 const HIDDEN: SandboxToggle = { kind: "hidden" };
 
-/** The sandbox toggle for a draft in the composer, and what its first send starts. */
+/** The sandbox toggle for a draft in the composer. */
 export function useSandboxToggle(draftId: DraftId | null, projectRef: ScopedProjectRef | null) {
   const enabled = draftId !== null && projectRef !== null && isSandboxMode();
   const project = useProject(enabled ? projectRef : null);
-  const environmentId = enabled ? projectRef.environmentId : null;
-  // Only the repository string, so the directory's polls don't re-render the composer.
-  const sandboxRepo = useSandboxDirectoryStore((state) =>
-    environmentId === null
-      ? null
-      : (state.entries.find((entry) => entry.environmentId === environmentId)?.repo ?? null),
+  const projects = useProjects();
+  const entries = useSandboxDirectoryStore((state) => state.entries);
+  return useMemo(
+    () => (enabled ? resolveSandboxToggle({ isDraft: true, project, entries, projects }) : HIDDEN),
+    [enabled, entries, project, projects],
   );
-  const sandboxHasThread =
-    useEnvironmentThreadRefs(sandboxRepo === null ? null : environmentId).length > 0;
-  const choice = useSandboxChoiceStore((state) =>
-    draftId === null ? null : selectSandboxChoice(state, draftId),
+}
+
+/**
+ * Keeps a draft out of sandboxes that hold another thread, moving it to the
+ * project's unstarted sandbox instead.
+ */
+export function useSandboxDraftPlacement(
+  draftId: DraftId | null,
+  projectRef: ScopedProjectRef | null,
+  toggle: SandboxToggle,
+) {
+  const draftThreadId = useComposerDraftStore((store) =>
+    draftId === null ? null : (store.getDraftSession(draftId)?.threadId ?? null),
   );
-  const toggle = useMemo(
-    () =>
-      enabled && project !== null
-        ? resolveSandboxToggle({
-            isDraft: true,
-            sandboxRepo,
-            sandboxHasThread,
-            repositoryIdentity: project.repositoryIdentity,
-          })
-        : HIDDEN,
-    [enabled, project, sandboxHasThread, sandboxRepo],
+  const threadRefs = useEnvironmentThreadRefs(
+    toggle.kind === "choose" && toggle.on ? (projectRef?.environmentId ?? null) : null,
   );
-  return { toggle, choice, instance: sandboxInstanceToStart(toggle, choice) };
+  const holdsAnotherThread = threadRefs.some((ref) => ref.threadId !== draftThreadId);
+  const target = sandboxDraftTarget(toggle, holdsAnotherThread);
+  useEffect(() => {
+    if (draftId !== null && target !== null) moveDraft(draftId, target);
+  }, [draftId, target]);
 }

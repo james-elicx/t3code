@@ -2,6 +2,7 @@ import {
   worktreeSetupStageLabel,
   type WorktreeSetupSnapshot,
   type WorktreeSetupStage,
+  type WorktreeSetupStageId,
 } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import {
@@ -14,7 +15,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { ChevronDown, ChevronRight } from "lucide";
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -23,6 +24,23 @@ import { MiddleTruncate } from "../ui/middle-truncate";
 import { observeVisibleAnimation } from "~/lib/visibleAnimation";
 import { cn } from "~/lib/utils";
 import { WorkLogRow } from "./WorkLog";
+
+/**
+ * What the setup card and the working header call the thing being set up. A
+ * worktree by default; a thread starting in a new sandbox shows that sandbox's
+ * boot through the same card.
+ */
+export interface WorktreeSetupLabels {
+  readonly subject: string;
+  readonly stage: (id: WorktreeSetupStageId) => string;
+}
+
+export const WORKTREE_SETUP_LABELS: WorktreeSetupLabels = {
+  subject: "worktree",
+  stage: worktreeSetupStageLabel,
+};
+
+export const WorktreeSetupLabelsContext = createContext(WORKTREE_SETUP_LABELS);
 
 interface WorktreeSetupCardProps {
   snapshot: WorktreeSetupSnapshot;
@@ -103,18 +121,19 @@ function ShimmerOverlay({ children }: { children: ReactNode }) {
   );
 }
 
-function headerLabel(snapshot: WorktreeSetupSnapshot): string {
+function headerLabel(snapshot: WorktreeSetupSnapshot, subject: string): string {
+  const Subject = subject.charAt(0).toUpperCase() + subject.slice(1);
   switch (snapshot.phase) {
     case "running":
-      return "Setting up worktree…";
+      return `Setting up ${subject}…`;
     case "done":
       return snapshot.stages.some((stage) => stage.status === "failed")
-        ? "Worktree ready, setup script failed"
-        : "Worktree ready";
+        ? `${Subject} ready, setup script failed`
+        : `${Subject} ready`;
     case "failed":
-      return "Worktree setup failed";
+      return `${Subject} setup failed`;
     case "cancelled":
-      return "Worktree setup cancelled";
+      return `${Subject} setup cancelled`;
   }
 }
 
@@ -133,7 +152,7 @@ function SetupHeaderRow({
   const failed = snapshot.phase === "failed";
   const finishedWithFailedStage =
     snapshot.phase === "done" && snapshot.stages.some((stage) => stage.status === "failed");
-  const text = headerLabel(snapshot);
+  const text = headerLabel(snapshot, use(WorktreeSetupLabelsContext).subject);
   const tone = failed
     ? "text-destructive-foreground"
     : finishedWithFailedStage
@@ -175,8 +194,8 @@ function StageRow({
   scriptName: string | null;
 }) {
   const elapsed = stageElapsedMs(stage, nowMs);
-  const label =
-    stage.id === "setup-script" && scriptName ? scriptName : worktreeSetupStageLabel(stage.id);
+  const labels = use(WorktreeSetupLabelsContext);
+  const label = stage.id === "setup-script" && scriptName ? scriptName : labels.stage(stage.id);
   const running = stage.status === "running";
   const trailing =
     stage.status === "pending"
@@ -309,7 +328,7 @@ function CollapsedSummaryRow({
       : snapshot.stages.some((stage) => stage.id === "setup-script" && stage.status === "failed")
         ? "failed"
         : "done";
-  const label = headerLabel(snapshot);
+  const label = headerLabel(snapshot, use(WorktreeSetupLabelsContext).subject);
   return (
     <WorkLogRow
       data-worktree-setup-stage="summary"

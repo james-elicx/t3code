@@ -1,13 +1,8 @@
-import type { RepositoryIdentity } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, type RepositoryIdentity } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { DraftId } from "../composerDraftStore";
-import {
-  resolveSandboxToggle,
-  sandboxInstanceToStart,
-  sandboxRepoOf,
-  selectSandboxChoice,
-} from "./toggle";
+import type { SandboxEntry } from "./directory";
+import { resolveSandboxToggle, sandboxDraftTarget, sandboxRepoOf } from "./toggle";
 
 const identity = (overrides: Partial<RepositoryIdentity> = {}): RepositoryIdentity => ({
   canonicalKey: "github.com/acme/demo",
@@ -15,7 +10,33 @@ const identity = (overrides: Partial<RepositoryIdentity> = {}): RepositoryIdenti
   ...overrides,
 });
 
-const draft = { isDraft: true, sandboxRepo: null, sandboxHasThread: false } as const;
+const sandbox = (overrides: Partial<SandboxEntry> = {}): SandboxEntry => ({
+  threadId: "t-slot",
+  title: "acme/demo",
+  status: "unstarted",
+  repo: "acme/demo",
+  projectId: "sandbox:acme/demo",
+  instance: "standard-1",
+  environmentId: "env-slot",
+  lastError: null,
+  ranAt: null,
+  setupStep: null,
+  pendingThread: null,
+  httpBaseUrl: "https://control.example/s/t-slot",
+  wsBaseUrl: "wss://control.example/s/t-slot/ws",
+  ...overrides,
+});
+
+const machineProject = {
+  environmentId: EnvironmentId.make("env-laptop"),
+  id: ProjectId.make("p-laptop"),
+  repositoryIdentity: identity(),
+};
+const slotProject = {
+  environmentId: EnvironmentId.make("env-slot"),
+  id: ProjectId.make("sandbox:acme/demo"),
+  repositoryIdentity: identity(),
+};
 
 describe("sandboxRepoOf", () => {
   it("names the GitHub repository a checkout pushes to", () => {
@@ -35,59 +56,84 @@ describe("sandboxRepoOf", () => {
 });
 
 describe("resolveSandboxToggle", () => {
-  it("offers a sandbox for a draft in a GitHub project on a machine", () => {
-    expect(resolveSandboxToggle({ ...draft, repositoryIdentity: identity() })).toEqual({
+  const projects = [machineProject, slotProject];
+
+  it("moves a draft on your machine to the project's unstarted sandbox", () => {
+    expect(
+      resolveSandboxToggle({
+        isDraft: true,
+        project: machineProject,
+        entries: [sandbox()],
+        projects,
+      }),
+    ).toEqual({
       kind: "choose",
       repo: "acme/demo",
+      on: false,
+      sandboxProjectRef: { environmentId: "env-slot", projectId: "sandbox:acme/demo" },
+      machineProjectRef: { environmentId: "env-laptop", projectId: "p-laptop" },
     });
   });
 
+  it("is on for a draft in a sandbox, and can move it back to your machine", () => {
+    const toggle = resolveSandboxToggle({
+      isDraft: true,
+      project: slotProject,
+      entries: [sandbox()],
+      projects,
+    });
+    expect(toggle.kind === "choose" && toggle.on).toBe(true);
+    expect(toggle.kind === "choose" && toggle.machineProjectRef?.environmentId).toBe("env-laptop");
+  });
+
+  it("has no sandbox to move to until the control plane keeps the repository", () => {
+    const toggle = resolveSandboxToggle({
+      isDraft: true,
+      project: machineProject,
+      entries: [],
+      projects: [machineProject],
+    });
+    expect(toggle.kind === "choose" && toggle.sandboxProjectRef).toBeNull();
+  });
+
+  it("never offers a running sandbox as the place for a new thread", () => {
+    const toggle = resolveSandboxToggle({
+      isDraft: true,
+      project: machineProject,
+      entries: [sandbox({ status: "running", environmentId: "env-busy" })],
+      projects,
+    });
+    expect(toggle.kind === "choose" && toggle.sandboxProjectRef).toBeNull();
+  });
+
   it("explains why a project without a GitHub remote can't use one", () => {
-    expect(resolveSandboxToggle({ ...draft, repositoryIdentity: null }).kind).toBe("unavailable");
-  });
-
-  it("sends straight into an empty sandbox: the draft is its one thread", () => {
-    expect(
-      resolveSandboxToggle({ ...draft, sandboxRepo: "acme/demo", repositoryIdentity: identity() }),
-    ).toEqual({ kind: "hidden" });
-  });
-
-  it("starts another sandbox from a sandbox that already has its thread", () => {
-    expect(
-      resolveSandboxToggle({
-        ...draft,
-        sandboxRepo: "acme/demo",
-        sandboxHasThread: true,
-        repositoryIdentity: identity(),
-      }),
-    ).toEqual({ kind: "locked", repo: "acme/demo" });
+    const project = { ...machineProject, repositoryIdentity: null };
+    expect(resolveSandboxToggle({ isDraft: true, project, entries: [], projects }).kind).toBe(
+      "unavailable",
+    );
   });
 
   it("is not offered once the thread has started", () => {
     expect(
-      resolveSandboxToggle({ ...draft, isDraft: false, repositoryIdentity: identity() }).kind,
+      resolveSandboxToggle({ isDraft: false, project: slotProject, entries: [sandbox()], projects })
+        .kind,
     ).toBe("hidden");
   });
 });
 
-describe("sandboxInstanceToStart", () => {
-  it("follows the choice where there is one to make", () => {
-    const toggle = { kind: "choose", repo: "acme/demo" } as const;
-    expect(sandboxInstanceToStart(toggle, "standard-1")).toBe("standard-1");
-    expect(sandboxInstanceToStart(toggle, null)).toBeNull();
+describe("sandboxDraftTarget", () => {
+  const toggle = resolveSandboxToggle({
+    isDraft: true,
+    project: slotProject,
+    entries: [sandbox()],
+    projects: [slotProject],
   });
 
-  it("always starts one from an occupied sandbox, and never otherwise", () => {
-    expect(sandboxInstanceToStart({ kind: "locked", repo: "acme/demo" }, null)).toBe("standard-1");
-    expect(sandboxInstanceToStart({ kind: "hidden" }, "standard-1")).toBeNull();
-    expect(sandboxInstanceToStart({ kind: "unavailable", reason: "" }, "standard-1")).toBeNull();
+  it("moves a draft out of a sandbox that already holds a thread", () => {
+    expect(sandboxDraftTarget(toggle, true)?.environmentId).toBe("env-slot");
   });
-});
 
-describe("selectSandboxChoice", () => {
-  it("defaults a new draft to the last choice, and keeps each draft's own", () => {
-    const state = { byDraft: { ["d-1" as DraftId]: null }, last: "standard-1" as const };
-    expect(selectSandboxChoice(state, "d-1" as DraftId)).toBeNull();
-    expect(selectSandboxChoice(state, "d-2" as DraftId)).toBe("standard-1");
+  it("leaves a draft that is its sandbox's one thread where it is", () => {
+    expect(sandboxDraftTarget(toggle, false)).toBeNull();
   });
 });

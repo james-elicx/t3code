@@ -1,147 +1,99 @@
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
-import { MoonIcon, TriangleAlertIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { BoxIcon, MoonIcon } from "lucide-react";
+import { useEffect, useMemo } from "react";
 
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
-import { Button } from "../components/ui/button";
-import { Spinner } from "../components/ui/spinner";
-import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { WORKTREE_SETUP_LABELS } from "../components/chat/WorktreeSetupCard";
 import type { DraftId } from "../composerDraftStore";
-import { environmentCatalog } from "../connection/catalog";
-import { useAtomCommand } from "../state/use-atom-command";
+import { useServerConfigs } from "../state/entities";
 import {
   isSandboxMode,
   type SandboxEntry,
+  startSandbox,
   useSandboxDirectoryStore,
   wakeSandbox,
 } from "./directory";
-import {
-  cancelSandboxPreparation,
-  clearSandboxPreparation,
-  prepareSandbox,
-  sandboxSetupStep,
-  useSandboxPreparationStore,
-} from "./preparation";
-import { useSandboxToggle } from "./useSandboxToggle";
+import { SANDBOX_SETUP_LABELS, useSandboxSetup } from "./setup";
+import { useSandboxDraftPlacement, useSandboxToggle } from "./useSandboxToggle";
 
 const VIEW_INTERVAL_MS = 60_000;
+/** How long a draft in an unstarted sandbox waits for a borrowed server config before booting it. */
+const CONFIG_GRACE_MS = 3_000;
 
-/**
- * Keeps the sandbox an open thread lives in awake, booting it if it slept, and
- * reconnects once it is back. Returns true while it is not yet running.
- */
-function useSandboxPresence(environmentId: EnvironmentId | null): boolean {
-  const find = (entries: ReadonlyArray<SandboxEntry>) =>
-    environmentId === null || !isSandboxMode()
-      ? undefined
-      : entries.find((candidate) => candidate.environmentId === environmentId);
-  const sandboxId = useSandboxDirectoryStore((state) => find(state.entries)?.threadId ?? null);
-  const status = useSandboxDirectoryStore((state) => find(state.entries)?.status ?? null);
-  const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
+const sandboxFor = (entries: ReadonlyArray<SandboxEntry>, environmentId: EnvironmentId | null) =>
+  environmentId === null || !isSandboxMode()
+    ? undefined
+    : entries.find((candidate) => candidate.environmentId === environmentId);
+
+/** Keeps the sandbox an open thread lives in awake, booting it if it slept. */
+function useSandboxPresence(environmentId: EnvironmentId | null) {
+  const sandboxId = useSandboxDirectoryStore(
+    (state) => sandboxFor(state.entries, environmentId)?.threadId ?? null,
+  );
+  const status = useSandboxDirectoryStore(
+    (state) => sandboxFor(state.entries, environmentId)?.status ?? null,
+  );
+  const hasRun = useSandboxDirectoryStore(
+    (state) => sandboxFor(state.entries, environmentId)?.ranAt != null,
+  );
+  const unstarted = status === "unstarted";
 
   useEffect(() => {
-    if (sandboxId === null) return;
+    // An unstarted sandbox starts only with a thread's first message.
+    if (sandboxId === null || unstarted) return;
     const view = () => void wakeSandbox(sandboxId).catch(() => undefined);
     view();
     const interval = setInterval(view, VIEW_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [sandboxId]);
+  }, [sandboxId, unstarted]);
 
-  // The connection backs off while the sandbox sleeps; skip the wait once it is up.
-  const wasRunning = useRef(status === "running");
-  useEffect(() => {
-    const running = status === "running";
-    if (running && !wasRunning.current && environmentId !== null) {
-      void retryEnvironment(environmentId);
-    }
-    wasRunning.current = running;
-  }, [environmentId, retryEnvironment, status]);
-
-  return sandboxId !== null && status !== "running";
+  return { sandboxId, status, hasRun };
 }
 
 /**
- * Everything ChatView needs for sandboxes: a draft's first send starting one
- * when the toggle is on, its setup banner, and waking the one an open thread
- * lives in.
+ * A draft in an unstarted sandbox offers the models of any sandbox this
+ * browser has seen. With none seen yet, the sandbox boots now, so the
+ * composer can offer its models; its first message then starts the thread
+ * the normal way.
+ */
+function useFirstSandboxWarmup(
+  sandbox: ReturnType<typeof useSandboxPresence>,
+  environmentId: EnvironmentId | null,
+) {
+  const configs = useServerConfigs();
+  const hasConfig = environmentId !== null && configs.has(environmentId);
+  const { sandboxId, status } = sandbox;
+  useEffect(() => {
+    if (sandboxId === null || status !== "unstarted" || hasConfig) return;
+    const timeout = setTimeout(
+      () => void startSandbox(sandboxId, {}).catch(() => undefined),
+      CONFIG_GRACE_MS,
+    );
+    return () => clearTimeout(timeout);
+  }, [hasConfig, sandboxId, status]);
+}
+
+/**
+ * Everything ChatView needs for sandboxes: the draft's placement, the setup
+ * card while a new sandbox boots, and waking the one an open thread lives in.
  */
 export function useSandboxComposer(input: {
   readonly draftId: DraftId | null;
   readonly projectRef: ScopedProjectRef | null;
-  readonly environmentId: EnvironmentId | null;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: string;
 }) {
-  const { draftId } = input;
-  const { toggle, instance } = useSandboxToggle(draftId, input.projectRef);
-  const preparation = useSandboxPreparationStore((state) =>
-    draftId === null ? undefined : state.byDraft[draftId],
-  );
-  const waking = useSandboxPresence(input.environmentId);
-  const repo = toggle.kind === "choose" || toggle.kind === "locked" ? toggle.repo : null;
-
-  const start = useCallback(() => {
-    if (draftId === null || repo === null || instance === null) return;
-    void prepareSandbox(draftId, { repo, instance });
-  }, [draftId, instance, repo]);
-
-  /** Call first in `onSend`: true when this send is held for a new sandbox. */
-  const interceptSend = useCallback(
-    (hasAttachments: boolean): boolean => {
-      if (draftId === null) return false;
-      if (preparation?.phase === "ready") {
-        // The draft is in its sandbox now; this is the held message going out.
-        clearSandboxPreparation(draftId);
-        return false;
-      }
-      if (preparation !== undefined && preparation.phase !== "failed") return true;
-      if (instance === null) return false;
-      if (hasAttachments) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: "Attachments can't start a sandbox",
-            description: "Send the first message as text, then attach files in the sandbox.",
-          }),
-        );
-        return true;
-      }
-      start();
-      return true;
-    },
-    [draftId, instance, preparation, start],
-  );
+  const toggle = useSandboxToggle(input.draftId, input.projectRef);
+  useSandboxDraftPlacement(input.draftId, input.projectRef, toggle);
+  const presence = useSandboxPresence(input.environmentId);
+  useFirstSandboxWarmup(presence, input.draftId === null ? null : input.environmentId);
+  const setup = useSandboxSetup(input.environmentId, input.threadId);
+  const { sandboxId, status, hasRun } = presence;
+  const isSandbox = sandboxId !== null;
+  const waking = isSandbox && hasRun && status !== "running";
+  const booting = isSandbox && !hasRun && status !== "unstarted";
 
   const banner = useMemo<ComposerBannerStackItem | null>(() => {
-    if (draftId !== null && preparation !== undefined && preparation.phase !== "ready") {
-      if (preparation.phase === "failed") {
-        return {
-          id: `sandbox-setup:${preparation.sandboxId}`,
-          variant: "error",
-          icon: <TriangleAlertIcon />,
-          title: "The sandbox did not start",
-          description: preparation.error,
-          actions: (
-            <Button size="xs" variant="ghost" disabled={repo === null} onClick={start}>
-              Retry
-            </Button>
-          ),
-          dismissLabel: "Dismiss",
-          onDismiss: () => clearSandboxPreparation(draftId),
-        };
-      }
-      return {
-        id: `sandbox-setup:${preparation.sandboxId}`,
-        variant: "default",
-        priority: "activity",
-        icon: <Spinner size="sm" />,
-        title: `Setting up a sandbox for ${preparation.repo}`,
-        description: sandboxSetupStep(preparation),
-        actions: (
-          <Button size="xs" variant="ghost" onClick={() => void cancelSandboxPreparation(draftId)}>
-            Cancel
-          </Button>
-        ),
-      };
-    }
     if (waking) {
       return {
         id: `sandbox-waking:${input.environmentId}`,
@@ -152,16 +104,30 @@ export function useSandboxComposer(input: {
         description: "Its saved state is coming back. You can read the thread meanwhile.",
       };
     }
+    // A thread's own setup card covers its boot; this is a boot with no thread yet.
+    if (booting && setup === null) {
+      return {
+        id: `sandbox-booting:${input.environmentId}`,
+        variant: "default",
+        priority: "activity",
+        icon: <BoxIcon />,
+        title: "Setting up a sandbox…",
+        description: "The first sandbox clones the repository before it can offer its models.",
+      };
+    }
     return null;
-  }, [draftId, input.environmentId, preparation, repo, start, waking]);
+  }, [booting, input.environmentId, setup, waking]);
 
   return {
-    interceptSend,
     banner,
-    /** The composer waits for the sandbox; sending is held. */
-    preparing: preparation !== undefined && preparation.phase !== "failed",
-    waking,
-    /** The draft has moved into its sandbox: ChatView sends the held message. */
-    resendReady: preparation?.phase === "ready",
+    /** The setup card for this thread while its new sandbox boots. */
+    setup,
+    setupLabels: setup === null ? WORKTREE_SETUP_LABELS : SANDBOX_SETUP_LABELS,
+    /**
+     * The environment is a sandbox that is not running: its own banner or card
+     * says so, and an unstarted one takes a draft's first message anyway.
+     */
+    unreachableByDesign: isSandbox && status !== "running",
+    unstarted: isSandbox && status === "unstarted",
   };
 }

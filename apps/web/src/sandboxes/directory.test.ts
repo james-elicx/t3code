@@ -18,6 +18,9 @@ const entry = (overrides: Partial<SandboxEntry> = {}): SandboxEntry => ({
   instance: "standard-1",
   environmentId: "env-1",
   lastError: null,
+  ranAt: "2026-10-17T10:00:00.000Z",
+  setupStep: null,
+  pendingThread: null,
   httpBaseUrl: "https://control.example.workers.dev/s/t-abc123",
   wsBaseUrl: "wss://control.example.workers.dev/s/t-abc123/ws",
   ...overrides,
@@ -41,6 +44,12 @@ describe("sandboxRegistration", () => {
 
   it("skips a sandbox whose T3 server has not answered yet", () => {
     expect(sandboxRegistration(entry({ environmentId: null, status: "starting" }))).toBeNull();
+  });
+
+  it("lists a project's unstarted sandbox under its repository", () => {
+    const registration = sandboxRegistration(entry({ status: "unstarted", ranAt: null }));
+    expect(registration?.target.environmentId).toBe("env-1");
+    expect(registration?.target.label).toBe("New sandbox · acme/demo");
   });
 
   it("keeps an asleep sandbox, so its threads stay listed from the cache", () => {

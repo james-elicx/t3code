@@ -78,8 +78,12 @@ async function api(
 
   if (id === undefined || id === "") {
     if (method === "GET") {
-      const sandboxes = await directory(exports).list();
-      return Response.json({ sandboxes: sandboxes.map((summary) => withRoutes(summary, url)) });
+      const plane = directory(exports);
+      const [sandboxes, projects] = await Promise.all([plane.list(), plane.projects()]);
+      return Response.json({
+        sandboxes: sandboxes.map((summary) => withRoutes(summary, url)),
+        projects,
+      });
     }
     if (method === "POST") {
       const input = (await request.json()) as Partial<CreateSandboxInput>;
