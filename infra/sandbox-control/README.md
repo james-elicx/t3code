@@ -59,9 +59,9 @@ Two test suites run against the running control plane:
 - `vp run e2e` creates a sandbox and proves each control-plane claim with shell-level evidence,
   including a `claude -p` turn through the gateway rewrite. It prints PASS/FAIL per claim and
   destroys the sandbox. Set `KEEP=1` to keep it.
-- `vp run e2e:ui` drives the web client in headless Chromium: start a sandbox thread from the
-  landing page and chat, start a second one with "New thread", reload, and delete one from the
-  command palette. It checks the mock's records to confirm Claude's own request went through the
+- `vp run e2e:ui` drives the web client in headless Chromium: start a sandbox from a repository and
+  chat, start a second thread from it (the toggle sends it to a new sandbox), put a sandbox to sleep
+  and reopen its thread, and delete a thread with its sandbox. It checks the mock's records to confirm Claude's own request went through the
   egress proxy. Set `BASE_URL` to run it against a deployment (see below); the mock checks are skipped when
   `MOCK_URL` is unreachable. It deletes the sandboxes it started unless `KEEP=1`.
 
@@ -110,9 +110,19 @@ mode, so other builds are unchanged. In sandbox mode:
 - Each sandbox in the directory that has booted is a platform environment at `/s/<thread-id>` on
   the same origin. The browser holds a placeholder token; the proxy replaces it with the sandbox's
   credential.
-- The landing page, "New sandbox thread" in the command palette, and "New thread" on a sandbox
-  project all start a thread in a new sandbox. One sandbox holds one thread.
-- "Delete this thread's sandbox" in the command palette is the way out.
+- New threads use the normal draft. The composer's sandbox toggle decides where the first message
+  goes: off, to the machine the draft is on (a computer you pair in Connections); on, to a new
+  sandbox for the project's GitHub repository (a fork's own remote). The draft waits in the
+  composer while the sandbox starts, then moves into the sandbox's project and sends. One sandbox
+  holds one thread, so a draft in a sandbox that has its thread can only start another. The toggle
+  is a size picker with one size today (`SANDBOX_INSTANCES`).
+- "Start from a GitHub repo…" in the command palette (and the landing page before any sandbox or
+  computer exists) starts a sandbox for a repository none of your machines has, then opens a draft
+  in it.
+- Opening a thread calls `/wake` and shows "Waking the sandbox…" until it runs; the transcript
+  reads from the browser's cache meanwhile. A browser that has never seen a sandbox wakes it once
+  to list its thread.
+- Deleting the thread deletes its sandbox, asleep or not.
 
 ## Configuration
 
