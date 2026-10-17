@@ -1,0 +1,21 @@
+infra/sandbox-control/e2e/sandbox-thread.e2e.ts
+  s_927e0e23985343::t_015effa3ade877 204
+infra/sandbox-control/src/worker.ts
+  s_927e0e23985343::t_302fd140dba354 190-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9cd084f5fef024c6bddb079bcce15ac6fa5c3d39",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
