@@ -19,6 +19,7 @@ import {
   type RecordedPullRequest,
   type SandboxSession,
 } from "./session.ts";
+import { sameSettings } from "./settings.ts";
 import { sharedMount } from "./sharedMount.ts";
 import { bridgeWebSocket } from "./wsBridge.ts";
 
@@ -27,6 +28,12 @@ const T3_PORT = 3773;
 const T3_BIN = ["node", "/opt/t3/dist/bin.mjs"];
 const T3_HOME = "/t3home";
 const SETTINGS_PATH = `${T3_HOME}/userdata/settings.json`;
+/** settings.json as this sandbox last saved it to the template, or as it booted with. */
+const SETTINGS_BASELINE_KEY = "settingsBaseline";
+
+const warnCaptureFailed = (error: unknown) =>
+  console.warn("capturing settings failed", String(error));
+
 const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 /**
  * The entrypoint waits for this boot's token here while the control plane
@@ -190,7 +197,6 @@ export class ThreadSandbox extends DurableObject<Env> {
   /** Where a first boot is, for the client's setup card. */
   private step: SetupStep | null = null;
   /** settings.json when T3 came up in this container; changes from it become the template. */
-  private settingsBaseline: string | null = null;
   /** The project's config when T3 came up; changes from it carry to later sandboxes. */
   private projectBaseline: ProjectConfig | null = null;
   private destroyed = false;
@@ -384,6 +390,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (this.container.running) {
       // A container whose T3 never came up holds nothing worth more than the last saves.
       if (this.t3Ready) {
+        await this.captureSettingsNow().catch(warnCaptureFailed);
         this.phase = "saving";
         await this.save(record);
         try {
@@ -408,6 +415,8 @@ export class ThreadSandbox extends DurableObject<Env> {
 
   async destroy(): Promise<void> {
     const record = await this.record();
+    // Settings edited since the last tick still become the template.
+    if (record && !record.probe) await this.captureSettingsNow().catch(warnCaptureFailed);
     this.destroyed = true;
     await this.destroyContainer("deleted");
     this.booting = null;
@@ -558,11 +567,14 @@ export class ThreadSandbox extends DurableObject<Env> {
   private async captureSettings() {
     const current = await this.readSettings();
     if (current === null) return;
-    const baseline = this.settingsBaseline;
-    this.settingsBaseline = current;
-    if (baseline !== null && current !== baseline) {
-      await directory(controlPlane(this.ctx)).setSettingsTemplate(current);
-    }
+    const baseline = await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY);
+    if (current === baseline) return;
+    await this.ctx.storage.put(SETTINGS_BASELINE_KEY, current);
+    if (baseline === undefined) return;
+    await directory(controlPlane(this.ctx)).setSettingsTemplate(current);
+    // T3 has reloaded the file, so its config now carries the new defaults.
+    const token = await this.ctx.storage.get<string>("t3Token");
+    if (token) await this.captureServerConfig(token);
   }
 
   /** settings.json, or null when it is missing or caught mid-write. */
@@ -639,7 +651,6 @@ export class ThreadSandbox extends DurableObject<Env> {
     const startedHere = !this.container.running;
     if (startedHere) {
       this.t3Ready = false;
-      this.settingsBaseline = null;
       this.projectBaseline = null;
       const snapshot = this.usableSnapshot(record);
       const preparedToken = randomId();
@@ -692,8 +703,9 @@ export class ThreadSandbox extends DurableObject<Env> {
       await this.ctx.storage.put("t3Token", token);
     }
     // Nobody can have edited settings yet: clients connect only once this boot is done.
-    if (startedHere || this.settingsBaseline === null) {
-      this.settingsBaseline = await this.readSettings();
+    if (startedHere || !(await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY))) {
+      const settings = await this.readSettings();
+      if (settings !== null) await this.ctx.storage.put(SETTINGS_BASELINE_KEY, settings);
     }
     if (!record.ranAt) await this.setStep(record, "launch");
     if (!record.probe) {
@@ -705,20 +717,30 @@ export class ThreadSandbox extends DurableObject<Env> {
     record.ranAt ??= new Date().toISOString();
     this.t3Ready = true;
     await this.save(record);
-    if (startedHere) {
-      await this.captureServerConfig(token).catch((error: unknown) =>
-        console.warn("reading the server config failed", String(error)),
-      );
-    }
+    if (startedHere && (await this.onSettingsTemplate())) await this.captureServerConfig(token);
     return token;
   }
 
   /**
    * Keeps this image's server config (its providers, models and settings) in
    * the directory, so a client can offer them in a sandbox that has not started.
+   * Only from a sandbox on the settings template: its settings are what a new
+   * thread's composer defaults to.
    */
   private async captureServerConfig(token: string) {
-    await directory(controlPlane(this.ctx)).setServerConfig(await this.readServerConfig(token));
+    try {
+      await directory(controlPlane(this.ctx)).setServerConfig(await this.readServerConfig(token));
+    } catch (error) {
+      console.warn("reading the server config failed", String(error));
+    }
+  }
+
+  /** Whether this sandbox's settings are the template new sandboxes start with. */
+  private async onSettingsTemplate(): Promise<boolean> {
+    const template = await directory(controlPlane(this.ctx)).settingsTemplate();
+    if (template === null) return true;
+    const settings = await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY);
+    return settings !== undefined && sameSettings(settings, template);
   }
 
   /** T3 serves its config only over its RPC socket: one `server.getConfig` request. */

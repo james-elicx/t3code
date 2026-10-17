@@ -21,6 +21,8 @@ const BOOT_TIMEOUT = 5 * 60_000;
 const REPLY_TIMEOUT = 3 * 60_000;
 const MOCK_REPLY = "Hello from the mock AI Gateway.";
 const PROMPT = "Say hello from the sandbox.";
+/** The default model the journey switches new threads to. */
+const CHANGED_MODEL = "claude-sonnet-5-5";
 
 interface Recorded {
   method: string;
@@ -129,6 +131,40 @@ const threadCached = (threadUrl: string) => {
       }),
     { key: `${environmentId}:${threadId}`, reply: mockAvailable ? MOCK_REPLY : "" },
   );
+};
+
+/**
+ * Sets the default model in the sandbox of a thread, here straight in the file
+ * T3 watches (Settings writes the same file), and waits until the control
+ * plane offers it to new threads. Returns the default it replaced.
+ */
+const setDefaultModel = async (threadUrl: string, model: string): Promise<string> => {
+  const sandbox = (await sandboxes()).find(
+    (candidate) => candidate.environmentId === environmentOf(threadUrl),
+  )!;
+  const exec = await page.request.post(`/api/sandboxes/${sandbox.threadId}/exec`, {
+    data: {
+      argv: [
+        "node",
+        "-e",
+        'const fs=require("fs"),f="/t3home/userdata/settings.json",s=JSON.parse(fs.readFileSync(f));' +
+          "process.stdout.write(s.defaultModelSelection.model);" +
+          `s.defaultModelSelection={instanceId:"claudeAgent",model:"${model}"};` +
+          "fs.writeFileSync(f,JSON.stringify(s))",
+      ],
+    },
+  });
+  expect(exec.ok(), await exec.text()).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const config = await page.request.get("/api/sandboxes/server-config");
+        return config.ok() ? (await config.json()).settings.defaultModelSelection.model : null;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(model);
+  return ((await exec.json()) as { stdout: string }).stdout;
 };
 
 const draftHero = () => page.getByText(new RegExp(`What should we build in .*${REPO_NAME}\\?`));
@@ -284,7 +320,11 @@ test("a thread's first message starts its sandbox, and Claude answers through th
   );
 });
 
-test("a new thread in the project starts in a sandbox of its own", async () => {
+test("a new thread in the project starts in a sandbox of its own, with defaults changed in another", async () => {
+  // A default changed in the first sandbox becomes what a new thread starts with.
+  const original = await setDefaultModel(firstThreadUrl, CHANGED_MODEL);
+
+  if (mockAvailable) await fetch(`${MOCK_URL}/__recorded`, { method: "DELETE" });
   await page
     .getByRole("button", { name: /^New thread/ })
     .first()
@@ -293,6 +333,19 @@ test("a new thread in the project starts in a sandbox of its own", async () => {
   secondThreadUrl = await startThread();
   expect(environmentOf(secondThreadUrl)).not.toBe(environmentOf(firstThreadUrl));
   await expect(threadRows()).toHaveCount(2);
+
+  if (!mockAvailable) return;
+  // Its first message went out with the new default, without reloading the page.
+  const recorded: Recorded[] = await (await fetch(`${MOCK_URL}/__recorded`)).json();
+  const models = recorded.flatMap((request) =>
+    request.stream === true && request.model ? [request.model] : [],
+  );
+  expect(
+    models.some((model) => model.startsWith(CHANGED_MODEL)),
+    JSON.stringify(models),
+  ).toBe(true);
+  // The template outlives this run; leave it as it was.
+  await setDefaultModel(secondThreadUrl, original);
 });
 
 test("an asleep sandbox wakes when its thread is opened", async () => {

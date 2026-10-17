@@ -83,10 +83,15 @@ async function api(
       const plane = directory(exports);
       await plane.ensureSlots();
       await plane.ensureServerConfig();
-      const [sandboxes, projects] = await Promise.all([plane.list(), plane.projects()]);
+      const [sandboxes, projects, serverConfigAt] = await Promise.all([
+        plane.list(),
+        plane.projects(),
+        plane.serverConfigAt(),
+      ]);
       return Response.json({
         sandboxes: sandboxes.map((summary) => withRoutes(summary, url)),
         projects,
+        serverConfigAt,
       });
     }
     if (method === "POST") {

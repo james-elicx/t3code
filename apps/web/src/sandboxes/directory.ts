@@ -136,13 +136,17 @@ export function newSandboxId(): string {
  * `configured` is false while a sandbox that has never run has no server
  * config in this browser's cache; the registration differs until it has one.
  */
+/**
+ * `cacheKey` names what the client seeded the sandbox's cache with; a new key
+ * changes the registration, so the client reads the cache again.
+ */
 export function sandboxRegistration(
   entry: SandboxEntry,
-  configured = true,
+  cacheKey?: string,
 ): BearerConnectionRegistration | null {
   if (entry.environmentId === null) return null;
   const environmentId = EnvironmentId.make(entry.environmentId);
-  const connectionId = `sandbox:${entry.threadId}${configured ? "" : ":unconfigured"}`;
+  const connectionId = `sandbox:${entry.threadId}${cacheKey === undefined ? "" : `:${cacheKey}`}`;
   const label =
     entry.status === "unstarted"
       ? `New sandbox · ${entry.repo}`
@@ -163,6 +167,8 @@ export function sandboxRegistration(
 export interface SandboxDirectoryState {
   readonly entries: ReadonlyArray<SandboxEntry>;
   readonly projects: ReadonlyArray<SandboxProjectEntry>;
+  /** When the control plane's server config last changed; null before any sandbox ran. */
+  readonly serverConfigAt: number | null;
   /** False until the first read, so nothing mistakes "not read yet" for "none". */
   readonly loaded: boolean;
 }
@@ -171,6 +177,7 @@ export interface SandboxDirectoryState {
 export const useSandboxDirectoryStore = create<SandboxDirectoryState>(() => ({
   entries: [],
   projects: [],
+  serverConfigAt: null,
   loaded: false,
 }));
 
@@ -230,11 +237,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function listSandboxes(): Promise<ReadonlyArray<SandboxEntry>> {
-  const { sandboxes, projects } = await request<{
+  const { sandboxes, projects, serverConfigAt } = await request<{
     sandboxes: SandboxEntry[];
     projects: SandboxProjectEntry[];
+    serverConfigAt?: number | null;
   }>("");
-  useSandboxDirectoryStore.setState({ entries: sandboxes, projects, loaded: true });
+  useSandboxDirectoryStore.setState({
+    entries: sandboxes,
+    projects,
+    serverConfigAt: serverConfigAt ?? null,
+    loaded: true,
+  });
   return sandboxes;
 }
 

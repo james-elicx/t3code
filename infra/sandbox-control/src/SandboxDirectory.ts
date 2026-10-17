@@ -53,7 +53,15 @@ export class SandboxDirectory extends DurableObject<Env> {
   }
 
   async setServerConfig(json: string): Promise<void> {
-    await this.ctx.storage.put("serverConfig", json);
+    await this.ctx.storage.put({ serverConfig: json, serverConfigAt: Date.now() });
+  }
+
+  /** When the server config last changed, so clients know to read it again. */
+  async serverConfigAt(): Promise<number | null> {
+    const at = await this.ctx.storage.get<number>("serverConfigAt");
+    if (at !== undefined) return at;
+    // Kept before configs were versioned.
+    return (await this.serverConfig()) === null ? null : 0;
   }
 
   /**
@@ -71,7 +79,7 @@ export class SandboxDirectory extends DurableObject<Env> {
   }
 
   async forgetServerConfig(): Promise<void> {
-    await this.ctx.storage.delete(["serverConfig", "probeStartedAt"]);
+    await this.ctx.storage.delete(["serverConfig", "serverConfigAt", "probeStartedAt"]);
   }
 
   /**

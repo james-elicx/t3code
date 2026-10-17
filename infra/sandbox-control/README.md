@@ -98,7 +98,11 @@ A sandbox keeps its disk until it is deleted, without running all the time:
 
 **Settings.** A new sandbox starts with the last T3 settings edited in any sandbox, from any client
 or by an agent. The lifecycle alarm notices the change in that sandbox's `settings.json` and stores
-it in `SandboxDirectory` as the template. Sandboxes that already exist keep their own settings.
+it in `SandboxDirectory` as the template, also when the sandbox sleeps or is deleted first. It
+reads that sandbox's server config again with it, so a new thread's composer defaults to the
+changed settings: only a sandbox on the template refreshes the config clients borrow, and the
+directory lists its version so open pages read it again. Sandboxes that already exist keep their
+own settings.
 Before any edit, new sandboxes use `container/sandbox-settings.json`. Secrets are not in that file:
 T3 keeps them under `secrets/`.
 

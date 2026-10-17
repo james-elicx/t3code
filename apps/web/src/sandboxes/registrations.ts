@@ -29,10 +29,10 @@ const DIRECTORY_POLL_INTERVAL = "3 seconds";
 
 /** What each environment's cache was last seeded with, this page load. */
 const seeded = new Map<string, string>();
-/** Environments given the control plane's server config, this page load. */
-const borrowed = new Set<string>();
-/** The control plane's server config, read once a page load once it has one. */
-let shared = Option.none<ServerConfig>();
+/** Which of the control plane's server configs each environment was given, this page load. */
+const borrowed = new Map<string, number>();
+/** The control plane's server config, read again when it changes. */
+let shared: { readonly at: number; readonly config: ServerConfig } | null = null;
 
 /**
  * Seeds the cache of each sandbox that has never run, so the client shows its
@@ -54,8 +54,11 @@ const seedNeverRun = Effect.fn("SandboxRegistrations.seedNeverRun")(function* (
       yield* cache.saveShell(environmentId, seededSandboxShell(entry, project));
       seeded.set(environmentId, signature);
     }
-    if (borrowed.has(environmentId)) continue;
-    const config = yield* sharedServerConfig().pipe(
+    const at = state.serverConfigAt;
+    if (at === null || borrowed.get(environmentId) === at) continue;
+    // A sandbox keeps the config it booted with; only an unstarted one follows changes.
+    if (borrowed.has(environmentId) && entry.status !== "unstarted") continue;
+    const config = yield* sharedServerConfig(at).pipe(
       Effect.tapError((error) =>
         Effect.logWarning("Could not read the sandboxes' server config.", { error }),
       ),
@@ -63,21 +66,24 @@ const seedNeverRun = Effect.fn("SandboxRegistrations.seedNeverRun")(function* (
     );
     if (Option.isNone(config)) continue;
     yield* cache.saveServerConfig(environmentId, borrowedServerConfig(config.value, environmentId));
-    borrowed.add(environmentId);
+    borrowed.set(environmentId, at);
   }
 });
 
 /**
- * The server config the control plane keeps from the last sandbox that
- * booted: every sandbox runs the same image, so it is what one that has not
- * started offers. None until the control plane's first boot.
+ * The server config the control plane keeps for sandboxes that have not
+ * started: every sandbox runs the same image, and its settings are the
+ * template new sandboxes start with. `at` is the version the directory lists.
  */
-const sharedServerConfig = Effect.fn("SandboxRegistrations.sharedServerConfig")(function* () {
-  if (Option.isSome(shared)) return shared;
+const sharedServerConfig = Effect.fn("SandboxRegistrations.sharedServerConfig")(function* (
+  at: number,
+) {
+  if (shared?.at === at) return Option.some(shared.config);
   const json = yield* Effect.tryPromise(fetchSharedServerConfig);
   if (json === null) return Option.none<ServerConfig>();
-  shared = Option.some(yield* decodeSharedServerConfig(json));
-  return shared;
+  const config = yield* decodeSharedServerConfig(json);
+  shared = { at, config };
+  return Option.some(config);
 });
 
 /** A project's unstarted sandbox takes its first thread through the control plane. */
@@ -101,10 +107,15 @@ const registrationsFor = (cache: CacheStore, state: SandboxDirectoryState) =>
     Effect.tap(() => Effect.sync(() => presumeUnstarted(state))),
     Effect.as(
       state.entries.flatMap((entry): ReadonlyArray<PlatformConnectionRegistration> => {
-        // Registered again once seeded with a server config, so the client reads it.
-        const configured =
-          entry.ranAt !== null || entry.environmentId === null || borrowed.has(entry.environmentId);
-        const registration = sandboxRegistration(entry, configured);
+        // Registered again each time it is seeded with a server config, so the client reads it.
+        const given = entry.environmentId === null ? undefined : borrowed.get(entry.environmentId);
+        const cacheKey =
+          given !== undefined
+            ? `config-${given}`
+            : entry.ranAt === null
+              ? "unconfigured"
+              : undefined;
+        const registration = sandboxRegistration(entry, cacheKey);
         return registration === null ? [] : [registration];
       }),
     ),
