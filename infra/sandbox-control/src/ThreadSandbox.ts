@@ -3,6 +3,15 @@ import { DurableObject } from "cloudflare:workers";
 
 import { controlPlane, type Env } from "./env.ts";
 import { lifecycleVerdict, type ShellThread } from "./lifecycle.ts";
+import {
+  launchRequest,
+  parseRepo,
+  projectConfigOf,
+  sameConfig,
+  type Json,
+  type ProjectConfig,
+  type SandboxLaunch,
+} from "./projects.ts";
 import { directory } from "./SandboxDirectory.ts";
 import {
   sandboxProjectId,
@@ -49,13 +58,30 @@ export const SANDBOX_PLACEHOLDER_ENV = {
   GH_TOKEN: "github-sandbox-placeholder",
 } as const;
 
-export interface CreateSandboxInput {
+export interface AllocateSandboxInput {
   readonly threadId: string;
   /** `owner/name` on GitHub; the sandbox may push only its own branches there. */
   readonly repo: string;
   readonly baseBranch?: string;
+}
+
+export interface StartSandboxInput {
   readonly title?: string;
   readonly instance?: SandboxInstance;
+  /** The thread to start in it, launched before any client connects. */
+  readonly launch?: SandboxLaunch;
+}
+
+export type CreateSandboxInput = AllocateSandboxInput & StartSandboxInput;
+
+/** What clients show for a sandbox's thread before its T3 server first answers. */
+export interface PendingThread {
+  readonly threadId: string;
+  readonly title: string;
+  readonly createdAt: string;
+  readonly modelSelection: Json;
+  readonly runtimeMode: string;
+  readonly interactionMode: string;
 }
 
 interface SandboxRecord {
@@ -71,7 +97,15 @@ interface SandboxRecord {
   /** Last `/wake`: a client has the thread open. */
   viewedAt: string;
   pullRequests: RecordedPullRequest[];
+  /** Chosen when the record is made, so clients know the environment before it runs. */
   environmentId?: string;
+  /** A project's next sandbox: listed, with no container until a thread starts it. */
+  unstarted?: boolean;
+  /** The thread its first boot launches, and when that launch went through. */
+  launch?: SandboxLaunch;
+  launchedAt?: string;
+  /** When its T3 server first answered. */
+  ranAt?: string;
   /** The settings template when this sandbox was created; written on its first boot. */
   readonly settings?: string;
   /** Saved and destroyed; only `/wake` or a create boots it again. */
@@ -85,10 +119,17 @@ interface SandboxRecord {
 }
 
 /**
- * `starting` covers the container booting, the clone and T3 starting;
- * `restoring` is the T3 home coming back from R2; `saving` precedes `asleep`.
+ * `unstarted` is a project's next sandbox; `starting` covers the container
+ * booting, the clone and T3 starting; `restoring` is the T3 home coming back
+ * from R2; `saving` precedes `asleep`.
  */
-export type SandboxStatus = "asleep" | "starting" | "restoring" | "saving" | "running";
+export type SandboxStatus =
+  | "unstarted"
+  | "asleep"
+  | "starting"
+  | "restoring"
+  | "saving"
+  | "running";
 
 /** What the directory shows for a sandbox without waking it. */
 export interface SandboxSummary {
@@ -105,6 +146,9 @@ export interface SandboxSummary {
   readonly savedAt: string | null;
   readonly lastActivityAt: string;
   readonly lastError: string | null;
+  readonly ranAt: string | null;
+  /** Its first thread, until the T3 server has it. */
+  readonly pendingThread: PendingThread | null;
 }
 
 export interface ExecResult {
@@ -129,8 +173,10 @@ export class ThreadSandbox extends DurableObject<Env> {
   /** True once the T3 server in the current container has answered. */
   private t3Ready = false;
   private phase: "restoring" | "saving" | null = null;
-  /** settings.json as first read in the current container; changes from it become the template. */
+  /** settings.json when T3 came up in this container; changes from it become the template. */
   private settingsBaseline: string | null = null;
+  /** The project's config when T3 came up; changes from it carry to later sandboxes. */
+  private projectBaseline: ProjectConfig | null = null;
   private destroyed = false;
   private lastActivityWrite = 0;
 
@@ -152,32 +198,66 @@ export class ThreadSandbox extends DurableObject<Env> {
     }
   }
 
-  async create(input: CreateSandboxInput): Promise<SandboxSummary> {
+  /**
+   * Makes the record without a container: a project's next sandbox. Its
+   * environment id is fixed now, so clients can list the project before
+   * anything runs.
+   */
+  async allocate(input: AllocateSandboxInput): Promise<SandboxSummary> {
     const existing = await this.record();
     if (existing) return this.summary(existing);
-    const [owner, name, ...extra] = input.repo.split("/");
-    if (!owner || !name || extra.length > 0) throw new Error("repo must be owner/name.");
-    const instance = input.instance ?? "standard-1";
-    if (!SANDBOX_INSTANCES.includes(instance)) throw new Error(`Unknown instance ${instance}.`);
+    const { owner, name } = parseRepo(input.repo);
     const now = new Date().toISOString();
-    const settings = await directory(controlPlane(this.ctx)).settingsTemplate();
     const record: SandboxRecord = {
       threadId: input.threadId,
-      title: input.title ?? input.threadId,
+      title: `${owner}/${name}`,
       repo: { owner, name },
       baseBranch: input.baseBranch ?? "main",
       branchPrefix: sessionBranchPrefix(input.threadId),
       createdAt: now,
-      instance,
+      instance: "standard-1",
       lastActivityAt: now,
       viewedAt: now,
       pullRequests: [],
-      ...(settings ? { settings } : {}),
+      environmentId: randomUuid(),
+      unstarted: true,
     };
     await this.save(record);
+    return this.summary(record);
+  }
+
+  /** Boots an unstarted sandbox, with the thread its first message starts. */
+  async start(input: StartSandboxInput): Promise<SandboxSummary> {
+    const record = await this.requireRecord();
+    if (!record.unstarted) return this.summary(record);
+    const instance = input.instance ?? record.instance;
+    if (!SANDBOX_INSTANCES.includes(instance)) throw new Error(`Unknown instance ${instance}.`);
+    const plane = directory(controlPlane(this.ctx));
+    await plane.captureRunningSettings();
+    const settings = await plane.settingsTemplate();
+    const now = new Date().toISOString();
+    const started: SandboxRecord = {
+      ...record,
+      title: input.title ?? input.launch?.title ?? record.title,
+      instance,
+      lastActivityAt: now,
+      viewedAt: now,
+      ...(settings ? { settings } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
+    };
+    delete started.unstarted;
+    await this.save(started);
     // Boot outside this request; callers poll the summary.
     await this.ctx.storage.setAlarm(Date.now());
-    return this.summary(record);
+    await plane.slotStarted(`${record.repo.owner}/${record.repo.name}`);
+    return this.summary(started);
+  }
+
+  async create(input: CreateSandboxInput): Promise<SandboxSummary> {
+    const existing = await this.record();
+    if (existing && !existing.unstarted) return this.summary(existing);
+    if (!existing) await this.allocate(input);
+    return this.start(input);
   }
 
   /**
@@ -186,7 +266,7 @@ export class ThreadSandbox extends DurableObject<Env> {
    */
   override async alarm(): Promise<void> {
     const record = await this.record();
-    if (!record || record.asleep) return;
+    if (!record || record.asleep || record.unstarted) return;
     try {
       if (!this.t3Ready || !this.container.running) await this.ready();
       else await this.tick(record);
@@ -238,6 +318,8 @@ export class ThreadSandbox extends DurableObject<Env> {
   /** A client has the thread open: keeps the sandbox awake, and boots it if it was asleep. */
   async wake(): Promise<SandboxSummary> {
     const record = await this.requireRecord();
+    // Only a thread's first message starts a project's next sandbox.
+    if (record.unstarted) return this.summary(record);
     record.viewedAt = new Date().toISOString();
     if (record.asleep) {
       delete record.asleep;
@@ -329,8 +411,15 @@ export class ThreadSandbox extends DurableObject<Env> {
    * every environment they know, so only `/wake` may boot one.
    */
   override async fetch(request: Request): Promise<Response> {
-    if ((await this.record())?.asleep) {
-      return Response.json({ status: "asleep" }, { status: 503 });
+    const record = await this.record();
+    if (record?.asleep || record?.unstarted) {
+      return Response.json({ status: this.status(record) }, { status: 503 });
+    }
+    // Booting takes a while; clients retry rather than hold a request open for it.
+    // A container already running (a restarted object) is only being reattached.
+    if (record && !this.t3Ready && (this.booting || !this.container.running)) {
+      if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now());
+      return Response.json({ status: this.status(record) }, { status: 503 });
     }
     let token: string;
     try {
@@ -371,7 +460,10 @@ export class ThreadSandbox extends DurableObject<Env> {
   private async tick(record: SandboxRecord) {
     const token = await this.ctx.storage.get<string>("t3Token");
     if (!token) return;
-    const shell = await this.t3Json<{ threads: ShellThread[] }>("/api/orchestration/shell", token);
+    const shell = await this.t3Json<{ threads: ShellThread[]; projects?: ShellProject[] }>(
+      "/api/orchestration/shell",
+      token,
+    );
     const verdict = lifecycleVerdict({
       threads: shell.threads,
       viewedAt: Date.parse(record.viewedAt),
@@ -386,7 +478,26 @@ export class ThreadSandbox extends DurableObject<Env> {
       return;
     }
     await this.captureSettings();
+    await this.captureProject(record, shell.projects);
     if (verdict === "checkpoint") await this.checkpoint(record);
+  }
+
+  /** Called before another sandbox starts, so it begins with what was just edited here. */
+  async captureSettingsNow(): Promise<void> {
+    if (this.t3Ready && this.container.running) await this.captureSettings();
+  }
+
+  /** Project settings edited here (scripts, default model, title) carry to later sandboxes. */
+  private async captureProject(
+    record: SandboxRecord,
+    projects: ReadonlyArray<ShellProject> | undefined,
+  ) {
+    const project = projects?.find((candidate) => candidate.id === sandboxProjectId(record.repo));
+    if (!project || this.projectBaseline === null) return;
+    const config = projectConfigOf(project);
+    if (sameConfig(config, this.projectBaseline)) return;
+    this.projectBaseline = config;
+    await directory(controlPlane(this.ctx)).updateProjectConfig(repoName(record), config);
   }
 
   /**
@@ -394,18 +505,25 @@ export class ThreadSandbox extends DurableObject<Env> {
    * template new sandboxes start with. Sandboxes that exist keep their own.
    */
   private async captureSettings() {
-    const output = await (await this.container.exec(["cat", SETTINGS_PATH])).output();
-    if (output.exitCode !== 0) return;
-    const current = new TextDecoder().decode(output.stdout);
-    try {
-      JSON.parse(current);
-    } catch {
-      return; // Read mid-write; the next tick sees the whole file.
-    }
+    const current = await this.readSettings();
+    if (current === null) return;
     const baseline = this.settingsBaseline;
     this.settingsBaseline = current;
     if (baseline !== null && current !== baseline) {
       await directory(controlPlane(this.ctx)).setSettingsTemplate(current);
+    }
+  }
+
+  /** settings.json, or null when it is missing or caught mid-write. */
+  private async readSettings(): Promise<string | null> {
+    const output = await (await this.container.exec(["cat", SETTINGS_PATH])).output();
+    if (output.exitCode !== 0) return null;
+    const current = new TextDecoder().decode(output.stdout);
+    try {
+      JSON.parse(current);
+      return current;
+    } catch {
+      return null;
     }
   }
 
@@ -471,6 +589,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (startedHere) {
       this.t3Ready = false;
       this.settingsBaseline = null;
+      this.projectBaseline = null;
       const snapshot = this.usableSnapshot(record);
       const preparedToken = randomId();
       await this.intercept(record);
@@ -481,6 +600,7 @@ export class ThreadSandbox extends DurableObject<Env> {
         env: {
           ...this.sandboxEnv(record),
           T3_SANDBOX_PREPARED: preparedToken,
+          ...(record.environmentId ? { T3_SANDBOX_ENVIRONMENT_ID: record.environmentId } : {}),
           ...(!record.backup && record.settings ? { T3_SANDBOX_SETTINGS: record.settings } : {}),
         },
         labels: { thread: record.threadId.slice(0, 64) },
@@ -517,11 +637,39 @@ export class ThreadSandbox extends DurableObject<Env> {
       token = await this.issueToken();
       await this.ctx.storage.put("t3Token", token);
     }
-    await this.ensureProject(record, token);
+    // Nobody can have edited settings yet: clients connect only once this boot is done.
+    if (startedHere || this.settingsBaseline === null) {
+      this.settingsBaseline = await this.readSettings();
+    }
+    this.projectBaseline = await this.ensureProject(record, token);
+    await this.launchPending(record, token);
     record.environmentId = descriptor.environmentId;
+    record.ranAt ??= new Date().toISOString();
     this.t3Ready = true;
     await this.save(record);
     return token;
+  }
+
+  /**
+   * Starts the thread the first message asked for, before any client
+   * connects, so no snapshot ever shows the sandbox without it. The launch is
+   * idempotent by command id. A failed launch leaves the sandbox up, with the
+   * error for the client that sent it.
+   */
+  private async launchPending(record: SandboxRecord, token: string) {
+    if (!record.launch || record.launchedAt) return;
+    const response = await this.t3Fetch("/api/orchestration/launch-thread", token, {
+      method: "POST",
+      body: JSON.stringify(launchRequest(record.launch, sandboxProjectId(record.repo))),
+    });
+    if (response.ok) {
+      await response.body?.cancel();
+      record.launchedAt = new Date().toISOString();
+      delete record.lastError;
+    } else {
+      record.lastError = `Starting the thread failed: HTTP ${response.status} ${await response.text()}`;
+      console.error("launching the first thread failed", record.lastError);
+    }
   }
 
   /**
@@ -548,25 +696,37 @@ export class ThreadSandbox extends DurableObject<Env> {
   }
 
   /**
-   * The checkout's project, created once with an id derived from the repo, so
-   * T3 never bootstraps one with an empty thread and a new sandbox for the same
-   * repo gets the same project id.
+   * The checkout's project, created once with an id derived from the repo and
+   * the config the control plane keeps for it, so T3 never bootstraps one with
+   * an empty thread and every sandbox for a repo has the same project. Returns
+   * its config as T3 has it now.
    */
-  private async ensureProject(record: SandboxRecord, token: string) {
+  private async ensureProject(record: SandboxRecord, token: string): Promise<ProjectConfig> {
     const projectId = sandboxProjectId(record.repo);
-    const shell = await this.t3Json<{ projects: Array<{ id: string }> }>(
+    const shell = await this.t3Json<{ projects: ShellProject[] }>(
       "/api/orchestration/shell",
       token,
     );
-    if (shell.projects.some((project) => project.id === projectId)) return;
+    const existing = shell.projects.find((project) => project.id === projectId);
+    if (existing) return projectConfigOf(existing);
+    const kept = (await directory(controlPlane(this.ctx)).project(repoName(record)))?.config;
+    const config: ProjectConfig = kept ?? {
+      title: record.repo.name,
+      defaultModelSelection: null,
+      scripts: [],
+    };
     const response = await this.t3Fetch("/api/projects/mutate", token, {
       method: "POST",
       body: JSON.stringify({
         type: "project.create",
         commandId: randomId(),
         projectId,
-        title: record.repo.name,
+        title: config.title,
         workspaceRoot: `/workspace/${record.repo.name}`,
+        ...(config.defaultModelSelection
+          ? { defaultModelSelection: config.defaultModelSelection }
+          : {}),
+        ...(config.scripts.length > 0 ? { scripts: config.scripts } : {}),
       }),
     });
     if (!response.ok) {
@@ -574,6 +734,8 @@ export class ThreadSandbox extends DurableObject<Env> {
         `Creating the project failed: HTTP ${response.status} ${await response.text()}`,
       );
     }
+    await response.body?.cancel();
+    return config;
   }
 
   /**
@@ -742,6 +904,7 @@ export class ThreadSandbox extends DurableObject<Env> {
   }
 
   private status(record: SandboxRecord): SandboxStatus {
+    if (record.unstarted) return "unstarted";
     if (record.asleep) return "asleep";
     if (this.phase) return this.phase;
     return this.t3Ready && this.container.running ? "running" : "starting";
@@ -762,11 +925,38 @@ export class ThreadSandbox extends DurableObject<Env> {
       savedAt: record.savedAt ?? null,
       lastActivityAt: record.lastActivityAt,
       lastError: record.lastError ?? null,
+      ranAt: record.ranAt ?? null,
+      pendingThread:
+        record.launch && !record.launchedAt
+          ? {
+              threadId: record.launch.threadId,
+              title: record.launch.title,
+              createdAt: record.launch.createdAt,
+              modelSelection: record.launch.modelSelection,
+              runtimeMode: record.launch.runtimeMode,
+              interactionMode: record.launch.interactionMode,
+            }
+          : null,
     };
   }
 }
 
+interface ShellProject {
+  readonly id: string;
+  readonly title: string;
+  readonly defaultModelSelection?: Json;
+  readonly scripts?: ReadonlyArray<Json>;
+}
+
+const repoName = (record: SandboxRecord) => `${record.repo.owner}/${record.repo.name}`;
+
 const backupPrefix = (record: SandboxRecord) => `${record.threadId}/`;
+
+/** A v4 UUID: what T3 writes as its environment id. */
+const randomUuid = () => {
+  const hex = randomId();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((Number.parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+};
 
 const randomId = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>

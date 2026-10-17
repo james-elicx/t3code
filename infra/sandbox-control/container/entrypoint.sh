@@ -37,6 +37,12 @@ if [ ! -f "$T3_HOME/userdata/settings.json" ]; then
   fi
 fi
 
+# The control plane picks the environment id before the sandbox first runs, so
+# clients can show its project and first thread while it boots.
+if [ -n "${T3_SANDBOX_ENVIRONMENT_ID:-}" ] && [ ! -s "$T3_HOME/userdata/environment-id" ]; then
+  printf '%s\n' "$T3_SANDBOX_ENVIRONMENT_ID" > "$T3_HOME/userdata/environment-id"
+fi
+
 # Shared skills and memories, read-only at /shared: Claude loads the skills and
 # imports the memory index, then reads the memories it links as it needs them.
 # A skills directory the sandbox made itself is left alone.

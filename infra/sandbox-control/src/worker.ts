@@ -3,7 +3,14 @@ import { controlPlane, type ControlPlaneExports, type Env } from "./env.ts";
 import { directory } from "./SandboxDirectory.ts";
 import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
-import type { CreateSandboxInput, SandboxSummary } from "./ThreadSandbox.ts";
+import { parseLaunch, parseRepo } from "./projects.ts";
+import {
+  SANDBOX_INSTANCES,
+  type CreateSandboxInput,
+  type SandboxInstance,
+  type SandboxSummary,
+  type StartSandboxInput,
+} from "./ThreadSandbox.ts";
 
 export { DirectoryBackupGateway, S3Gateway } from "@cloudflare/sandbox";
 export { Egress } from "./egress/Egress.ts";
@@ -64,8 +71,10 @@ async function api(
   exports: ControlPlaneExports,
   url: URL,
 ): Promise<Response> {
-  const [, , , id, action] = url.pathname.split("/");
+  const [, , , id, action, extra] = url.pathname.split("/");
   const method = request.method;
+
+  if (id === "projects") return projectsApi(request, exports, action, extra);
 
   if (id === undefined || id === "") {
     if (method === "GET") {
@@ -78,12 +87,14 @@ async function api(
         return text(400, "threadId must be a DNS label: lowercase letters, digits and hyphens.");
       }
       if (typeof input.repo !== "string") return text(400, "repo (owner/name) is required.");
+      const start = startInput(input);
+      if (typeof start === "string") return text(400, start);
+      await directory(exports).addProject(input.repo);
       const summary = await exports.ThreadSandbox.getByName(input.threadId).create({
         threadId: input.threadId,
         repo: input.repo,
         ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
-        ...(input.title ? { title: input.title } : {}),
-        ...(input.instance ? { instance: input.instance } : {}),
+        ...start,
       });
       return Response.json(withRoutes(summary, url), { status: 202 });
     }
@@ -101,6 +112,13 @@ async function api(
     case "DELETE ":
       await sandbox.destroy();
       return new Response(null, { status: 204 });
+    // A new thread's first message, into a project's unstarted sandbox.
+    case "POST start": {
+      const start = startInput(await request.json());
+      if (typeof start === "string") return text(400, start);
+      if (summary.status !== "unstarted") return text(409, `Sandbox ${id} already has a thread.`);
+      return Response.json(withRoutes(await sandbox.start(start), url), { status: 202 });
+    }
     // A client has the thread open; boots an asleep sandbox. Call it again every minute.
     case "POST wake":
       return Response.json(withRoutes(await sandbox.wake(), url), { status: 202 });
@@ -128,6 +146,52 @@ async function api(
     }
   }
   return text(404, "Not found.");
+}
+
+/** Projects: a GitHub repository each, with an unstarted sandbox ready for its next thread. */
+async function projectsApi(
+  request: Request,
+  exports: ControlPlaneExports,
+  owner: string | undefined,
+  name: string | undefined,
+): Promise<Response> {
+  const plane = directory(exports);
+  if (!owner) {
+    if (request.method === "GET") return Response.json({ projects: await plane.projects() });
+    if (request.method === "POST") {
+      const { repo } = (await request.json()) as { repo?: unknown };
+      if (typeof repo !== "string") return text(400, "repo (owner/name) is required.");
+      try {
+        parseRepo(repo);
+      } catch (error) {
+        return text(400, String(error instanceof Error ? error.message : error));
+      }
+      await plane.addProject(repo);
+      return Response.json(await plane.project(repo), { status: 201 });
+    }
+    return text(405, "Use GET or POST.");
+  }
+  if (request.method !== "DELETE" || !name) return text(404, "Not found.");
+  await plane.removeProject(`${owner}/${name}`);
+  return new Response(null, { status: 204 });
+}
+
+/** What starts a sandbox, from a request body, or why it cannot. */
+function startInput(value: unknown): StartSandboxInput | string {
+  const body = (value ?? {}) as { title?: unknown; instance?: unknown; launch?: unknown };
+  if (
+    body.instance !== undefined &&
+    !SANDBOX_INSTANCES.includes(body.instance as SandboxInstance)
+  ) {
+    return `instance must be one of ${SANDBOX_INSTANCES.join(", ")}.`;
+  }
+  const launch = body.launch === undefined ? undefined : parseLaunch(body.launch);
+  if (typeof launch === "string") return launch;
+  return {
+    ...(typeof body.title === "string" && body.title.trim() ? { title: body.title } : {}),
+    ...(body.instance ? { instance: body.instance as SandboxInstance } : {}),
+    ...(launch ? { launch } : {}),
+  };
 }
 
 /**
