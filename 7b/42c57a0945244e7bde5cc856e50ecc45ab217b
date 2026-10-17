@@ -1,0 +1,41 @@
+apps/web/src/sandboxes/directory.ts
+  s_927e0e23985343::t_721046a4bafddb 135-142,145
+apps/web/src/sandboxes/registrations.ts
+  s_927e0e23985343::t_27bf96b5fa32f8 3,32,34-35,39-42,58,60,62,71-73,75-76,78-80,104-107
+apps/web/src/sandboxes/seed.ts
+  s_927e0e23985343::t_2fd125fbb187de 120
+apps/web/src/sandboxes/useSandboxComposer.tsx
+  s_927e0e23985343::t_a4a17a3845f0fb 63,69-70,91-101,105
+infra/sandbox-control/README.md
+  s_927e0e23985343::t_041021c98b0f8c 62-66,140-146,160-162
+infra/sandbox-control/container/entrypoint.sh
+  s_927e0e23985343::t_c48ed35934c6e5 60-78
+infra/sandbox-control/e2e/sandbox-thread.e2e.ts
+  s_927e0e23985343::t_c57ffe8ea56a81 11-14,142,156-157,175-177,179-221,223-225,227-229,251-252,265,293,375-395
+infra/sandbox-control/src/SandboxDirectory.ts
+  s_927e0e23985343::t_5e4f622bf2f5b2 17-19,47-49,59-76
+infra/sandbox-control/src/ThreadSandbox.ts
+  s_927e0e23985343::t_3e84cf6d492cbc 90-96,123-124,272-293,308-315,515,523-526,655,699-702,708-712,716-777,1033
+infra/sandbox-control/src/lifecycle.test.ts
+  s_927e0e23985343::t_57a125c7c8c564 7,15,49-55
+infra/sandbox-control/src/lifecycle.ts
+  s_927e0e23985343::t_66dd614d9ec0c2 9,18-19,31,34-35,41-44
+infra/sandbox-control/src/worker.ts
+  s_927e0e23985343::t_c36a4c50ad1e01 79,85,159-164,172-174,177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7b42c57a0945244e7bde5cc856e50ecc45ab217b",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
