@@ -64,6 +64,8 @@ const basic = (token: string) =>
   `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
 
 let viewing: ReturnType<typeof setInterval> | undefined;
+/** Creating a sandbox adds its repository as a project, which teardown removes again. */
+let projectExisted = true;
 
 async function main() {
   for (const url of [`${control}/api/sandboxes`, `${mock}/__refs`]) {
@@ -73,6 +75,9 @@ async function main() {
   }
 
   // --- Create, list, proxy -------------------------------------------------
+  projectExisted = ((await api("")).projects as Array<{ repo: string }>).some(
+    (project) => project.repo === "acme/demo",
+  );
   const started = Date.now();
   await api("", { method: "POST", body: JSON.stringify({ threadId, repo: "acme/demo" }) });
   let summary: {
@@ -561,7 +566,10 @@ try {
   console.log(`FAIL  ${String(error)}`);
 } finally {
   clearInterval(viewing);
-  if (process.env.KEEP !== "1") await api(`/${threadId}`, { method: "DELETE" }).catch(() => {});
+  if (process.env.KEEP !== "1") {
+    await api(`/${threadId}`, { method: "DELETE" }).catch(() => {});
+    if (!projectExisted) await api("/projects/acme/demo", { method: "DELETE" }).catch(() => {});
+  }
 }
 console.log(failures === 0 ? "\nAll proofs passed." : `\n${failures} proof(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

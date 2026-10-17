@@ -50,7 +50,7 @@ vp run mock                               # terminal 1: mock AI Gateway, GitHub,
 vp run dev                                # terminal 2: cf dev, builds the image on first start
 ```
 
-Open http://localhost:8787, enter `acme/demo` (the mock's only repository) and start a thread. The
+Open http://localhost:8787, add `acme/demo` (the mock's only repository) and send a message. The
 sandbox clones the repo onto `t3/<thread-id>/work`, and T3 opens its one thread with Claude Code
 (Opus 5.5) as the agent. The mock gateway answers every model request with a short streamed reply.
 
@@ -58,14 +58,14 @@ Two test suites run against the running control plane:
 
 - `vp run e2e` creates a sandbox and proves each control-plane claim with shell-level evidence,
   including a `claude -p` turn through the gateway rewrite. It prints PASS/FAIL per claim and
-  destroys the sandbox. Set `KEEP=1` to keep it.
-- `vp run e2e:ui` drives the web client in headless Chromium: start a sandbox from a repository and
-  chat, start a second thread from it (the toggle sends it to a new sandbox), put a sandbox to sleep
-  and reopen its thread, and delete a thread with its sandbox. It also covers a repository that
-  does not clone, cancelling a sandbox's setup, and a fresh browser listing an asleep sandbox's
-  thread. It checks the mock's records to confirm Claude's own request went through the
-  egress proxy. Set `BASE_URL` to run it against a deployment (see below); the mock checks are skipped when
-  `MOCK_URL` is unreachable. It deletes the sandboxes it started unless `KEEP=1`.
+  destroys the sandbox, and the project if it added it. Set `KEEP=1` to keep them.
+- `vp run e2e:ui` drives the web client in headless Chromium: add a repository (and one the
+  control plane can't read), start a thread and chat, start a second thread in its own sandbox,
+  put a sandbox to sleep and reopen its thread, list an asleep sandbox's thread in a fresh browser,
+  delete a thread with its sandbox, and remove the project. It checks the mock's records to confirm
+  Claude's own request went through the egress proxy. Set `BASE_URL` to run it against a deployment
+  (see below); the mock checks are skipped when `MOCK_URL` is unreachable. It deletes the sandboxes
+  and project it added unless `KEEP=1`.
 
 Unit tests for the parser and policies: `vp run test`.
 
@@ -134,15 +134,22 @@ mode, so other builds are unchanged. In sandbox mode:
 - Each sandbox in the directory that has booted is a platform environment at `/s/<thread-id>` on
   the same origin. The browser holds a placeholder token; the proxy replaces it with the sandbox's
   credential.
-- New threads use the normal draft. The composer's sandbox toggle decides where the first message
-  goes: off, to the machine the draft is on (a computer you pair in Connections); on, to a new
-  sandbox for the project's GitHub repository (a fork's own remote). The draft waits in the
-  composer while the sandbox starts, then moves into the sandbox's project and sends. One sandbox
-  holds one thread, so a draft in a sandbox that has its thread can only start another. The toggle
-  is a size picker with one size today (`SANDBOX_INSTANCES`).
-- "Start from a GitHub repo…" in the command palette (and the landing page before any sandbox or
-  computer exists) starts a sandbox for a repository none of your machines has, then opens a draft
-  in it.
+- The control plane keeps your repositories as projects, and each project has one unstarted
+  sandbox with its environment id already assigned. The client lists that environment from a
+  seeded cache, with the project and a server config borrowed from another environment (or the
+  copy the control plane keeps from the last sandbox that ran), so a project has drafts, settings
+  and a "New thread" before any sandbox has run. The very first sandbox has no config to borrow;
+  the client boots it once ("Setting up a sandbox…") to get one.
+- A draft's first message starts the project's unstarted sandbox with that message
+  (`POST /:id/start`). The thread lists at once and shows "Setting up sandbox…" with the boot steps,
+  as a thread on a computer shows its worktree being made, and the control plane gives the project
+  a new unstarted sandbox for the next thread.
+- The composer's sandbox toggle decides where a draft goes: off, to the machine the draft is on (a
+  computer you pair in Connections); on, to the project's unstarted sandbox for its GitHub
+  repository (a fork's own remote). One sandbox holds one thread. The toggle is a size picker with
+  one size today (`SANDBOX_INSTANCES`).
+- "Add project" names a GitHub repository (`/sandbox`); the control plane refuses one its token
+  cannot read. "Remove project" removes it from the control plane, with its sandboxes.
 - Opening a thread calls `/wake` and shows "Waking the sandbox…" until it runs; the transcript
   reads from the browser's cache meanwhile. A browser that has never seen a sandbox wakes it once
   to list its thread.
