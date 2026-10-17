@@ -173,6 +173,7 @@ import * as RunFinalizationService from "./orchestration-v2/RunFinalizationServi
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
+import * as ThreadLaunchHttp from "./orchestration-v2/launchHttp.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
@@ -697,6 +698,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
+      Layer.provide(ThreadLaunchHttp.layer),
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),

@@ -54,6 +54,7 @@ import {
   OrchestrationV2ThreadBoundedSnapshot,
   OrchestrationV2ThreadDetailSnapshot,
   OrchestrationV2ThreadHistoryPage,
+  OrchestrationV2ThreadLaunchInput,
 } from "./orchestrationV2.ts";
 import { Project, ProjectMutation, ProjectSnapshot } from "./project.ts";
 import {
@@ -123,6 +124,7 @@ export const EnvironmentInternalErrorReason = Schema.Literals([
   "orchestration_thread_snapshot_failed",
   "orchestration_thread_bounded_snapshot_failed",
   "orchestration_thread_history_failed",
+  "orchestration_thread_launch_failed",
   "internal_error",
 ]);
 export type EnvironmentInternalErrorReason = typeof EnvironmentInternalErrorReason.Type;
@@ -598,6 +600,22 @@ const EnvironmentOrchestrationThreadHistoryQuery = Schema.Struct({
   view: Schema.optional(Schema.Literals(["conversation", "activity"])),
 });
 
+/**
+ * A launch over HTTP, for callers without a socket such as a control plane
+ * that starts a thread in a server it manages. The thread itself arrives
+ * through the shell, so only its id comes back.
+ */
+export const EnvironmentOrchestrationThreadLaunchResult = Schema.Struct({
+  threadId: ThreadId,
+  resumed: Schema.Boolean,
+});
+
+const EnvironmentOrchestrationThreadLaunchErrors = [
+  EnvironmentRequestInvalidError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
 const EnvironmentOrchestrationThreadHistoryErrors = [
   EnvironmentRequestInvalidError,
   EnvironmentScopeRequiredError,
@@ -639,6 +657,15 @@ class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestration")
       error: EnvironmentOrchestrationThreadHistoryErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
+
+class EnvironmentThreadLaunchHttpApi extends HttpApiGroup.make("threadLaunch").add(
+  HttpApiEndpoint.post("launch", "/api/orchestration/launch-thread", {
+    headers: OrchestrationProtocolHeaders,
+    payload: OrchestrationV2ThreadLaunchInput,
+    success: EnvironmentOrchestrationThreadLaunchResult,
+    error: EnvironmentOrchestrationThreadLaunchErrors,
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
 
 class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
   .add(
@@ -763,6 +790,7 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentMcpOAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
+  .add(EnvironmentThreadLaunchHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentConnectHttpApi)

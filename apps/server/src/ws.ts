@@ -1973,38 +1973,9 @@ const layerWsRpc = (
             Effect.andThen(
               startup
                 .enqueueCommand(
-                  ThreadMessageIntake.launchThread({
-                    commandId: input.commandId,
-                    ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-                    ...(input.reuseExistingThread === undefined
-                      ? {}
-                      : { reuseExistingThread: input.reuseExistingThread }),
-                    projectId: input.projectId,
-                    title: input.title,
-                    ...(input.generateTitle === undefined
-                      ? {}
-                      : { generateTitle: input.generateTitle }),
-                    modelSelection: input.modelSelection,
-                    runtimeMode: input.runtimeMode,
-                    interactionMode: input.interactionMode,
-                    workspaceStrategy: input.workspaceStrategy,
-                    ...(input.initialMessage === undefined
-                      ? {}
-                      : {
-                          initialMessage: {
-                            ...(input.initialMessage.messageId === undefined
-                              ? {}
-                              : { messageId: input.initialMessage.messageId }),
-                            text: input.initialMessage.text,
-                            attachments: input.initialMessage.attachments,
-                            ...(input.initialMessage.context === undefined
-                              ? {}
-                              : { context: input.initialMessage.context }),
-                          },
-                        }),
-                    createdBy: "user",
-                    creationSource: input.creationSource ?? "web",
-                  }).pipe(Effect.provide(intakeContext)),
+                  ThreadMessageIntake.launchThread(
+                    ThreadMessageIntake.threadLaunchFromWire(input),
+                  ).pipe(Effect.provide(intakeContext)),
                 )
                 .pipe(
                   Effect.tap(() =>
