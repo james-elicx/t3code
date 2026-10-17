@@ -201,7 +201,7 @@ const deleteInT3 = (sandboxId: string, threadId: string) =>
               _tag: "Request",
               id: "delete",
               tag: "orchestration.dispatchCommand",
-              payload: { type: "thread.delete", commandId: crypto.randomUUID(), threadId },
+              payload: { type: "thread.delete", commandId: `e2e-delete-${Date.now()}`, threadId },
               headers: [],
             }),
           ),

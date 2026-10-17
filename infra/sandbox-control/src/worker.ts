@@ -187,11 +187,20 @@ async function unreadableRepository(env: Env, repo: string): Promise<string | nu
       ...(authorization ? { authorization } : {}),
     },
   });
-  await response.body?.cancel();
-  if (response.ok) return null;
-  return response.status === 404
-    ? `No GitHub repository ${repo} that the control plane's token can read.`
-    : `GitHub answered HTTP ${response.status} for ${repo}.`;
+  if (response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (response.status === 404) {
+    await response.body?.cancel();
+    return `No GitHub repository ${repo} that the control plane's token can read.`;
+  }
+  // GitHub says why, e.g. SAML SSO the token isn't authorized for, or a rate limit.
+  const reason = await response
+    .json<{ message?: unknown }>()
+    .then((body) => (typeof body.message === "string" ? ` ${body.message}` : ""))
+    .catch(() => "");
+  return `GitHub answered HTTP ${response.status} for ${repo}.${reason}`;
 }
 
 /** Projects: a GitHub repository each, with an unstarted sandbox ready for its next thread. */
