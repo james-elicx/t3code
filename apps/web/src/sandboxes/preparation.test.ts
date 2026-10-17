@@ -83,4 +83,23 @@ describe("prepareSandbox", () => {
       url: `https://control.example/api/sandboxes/${cancelledId}`,
     });
   });
+
+  it("deletes a sandbox whose create finishes after it was cancelled", async () => {
+    let finishCreate = () => {};
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      requests.push({ method: init?.method ?? "GET", url });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      await new Promise<void>((resolve) => (finishCreate = resolve));
+      return Response.json(entry({ threadId: "created" }), { status: 202 });
+    });
+    const done = prepareSandbox(DRAFT, { repo: "acme/demo", instance: "standard-1" });
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const cancelledId = sandboxId();
+    // The control plane may handle this delete before the create.
+    await cancelSandboxPreparation(DRAFT);
+    finishCreate();
+    await done;
+    expect(requests.map(({ method }) => method)).toEqual(["POST", "DELETE", "DELETE"]);
+    expect(requests.at(-1)?.url).toBe(`https://control.example/api/sandboxes/${cancelledId}`);
+  });
 });

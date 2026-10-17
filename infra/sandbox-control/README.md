@@ -61,7 +61,9 @@ Two test suites run against the running control plane:
   destroys the sandbox. Set `KEEP=1` to keep it.
 - `vp run e2e:ui` drives the web client in headless Chromium: start a sandbox from a repository and
   chat, start a second thread from it (the toggle sends it to a new sandbox), put a sandbox to sleep
-  and reopen its thread, and delete a thread with its sandbox. It checks the mock's records to confirm Claude's own request went through the
+  and reopen its thread, and delete a thread with its sandbox. It also covers a repository that
+  does not clone, cancelling a sandbox's setup, and a fresh browser listing an asleep sandbox's
+  thread. It checks the mock's records to confirm Claude's own request went through the
   egress proxy. Set `BASE_URL` to run it against a deployment (see below); the mock checks are skipped when
   `MOCK_URL` is unreachable. It deletes the sandboxes it started unless `KEEP=1`.
 

@@ -166,7 +166,11 @@ export async function prepareSandbox(
     });
     update(draftId, sandboxId, { phase: "ready", sandboxId, projectRef });
   } catch (error) {
-    if (error instanceof Error && error.message === "cancelled") return;
+    // Cancel deletes the sandbox, but a create still in flight then may have made it after.
+    if (error instanceof Error && error.message === "cancelled") {
+      await deleteSandbox(sandboxId).catch(() => undefined);
+      return;
+    }
     const failed = update(draftId, sandboxId, {
       phase: "failed",
       sandboxId,

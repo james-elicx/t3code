@@ -6,7 +6,9 @@ import { expect, test, type Page } from "@playwright/test";
  * The full sandbox-thread journey in the hosted web client: start a sandbox
  * from a repository, chat with Claude through the egress proxy, start a second
  * thread (which the toggle sends to a new sandbox), let a sandbox sleep and
- * reopen its thread, and delete a thread with its sandbox.
+ * reopen its thread, and delete a thread with its sandbox. Along the way: a
+ * repository that does not clone, cancelling a sandbox's setup, and a browser
+ * that has never seen a sandbox.
  */
 
 const MOCK_URL = process.env.MOCK_URL ?? "http://127.0.0.1:8790";
@@ -61,13 +63,13 @@ const composer = () => page.getByTestId("composer-editor");
 const assistantMessages = () =>
   page.locator('[data-timeline-row-kind="message"][data-message-role="assistant"]');
 /**
- * Sidebar thread rows, named "<title>, …, <project>". The project reads
+ * Sidebar thread rows, named "<title>, …, <project>", without drafts. The project reads
  * "acme/demo" while several sandboxes of the repo group together, else "demo".
  */
-const threadRows = () =>
-  page
-    .getByRole("navigation", { name: "Threads" })
-    .getByRole("button", { name: new RegExp(`, (?:[\\w.-]+/)?${REPO_NAME}$`) });
+const threadRows = (on: Page = page) =>
+  on.getByRole("navigation", { name: "Threads" }).getByRole("button", {
+    name: new RegExp(`^(?!.*, Unsent draft, ).*, (?:[\\w.-]+/)?${REPO_NAME}$`),
+  });
 
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage();
@@ -86,6 +88,33 @@ test.afterAll(async () => {
   }
   await page.close();
 });
+
+/**
+ * Whether this browser has cached the thread's messages, which it writes about
+ * half a second after opening the thread and then at most every 10 seconds.
+ */
+const threadCached = (threadUrl: string) => {
+  const [environmentId, threadId] = new URL(threadUrl).pathname
+    .split("/")
+    .slice(1)
+    .map(decodeURIComponent);
+  return page.evaluate(
+    ({ key, reply }) =>
+      new Promise<boolean>((resolve) => {
+        const open = indexedDB.open("t3code:connection-runtime");
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const read = open.result.transaction("thread").objectStore("thread").get(key);
+          read.onerror = () => resolve(false);
+          read.onsuccess = () => {
+            open.result.close();
+            resolve(typeof read.result === "string" && read.result.includes(reply));
+          };
+        };
+      }),
+    { key: `${environmentId}:${threadId}`, reply: mockAvailable ? MOCK_REPLY : "" },
+  );
+};
 
 const sendPrompt = async () => {
   await composer().click();
@@ -135,6 +164,18 @@ test("a sandbox started from a repository runs Claude through the egress proxy",
   );
 });
 
+test("a repository that does not clone reports it, and its sandbox is removed", async () => {
+  const before = await sandboxIds();
+  await page.goto("/sandbox");
+  await page.getByLabel("GitHub repository").fill(`${REPO.split("/")[0]}/t3-no-such-repo`);
+  await page.getByRole("button", { name: "Start sandbox" }).click();
+  await expect(page.getByRole("alert")).toContainText("The sandbox did not start", {
+    timeout: BOOT_TIMEOUT,
+  });
+  await expect.poll(async () => (await sandboxesSince(before)).length).toBe(0);
+  await expect(page.getByRole("button", { name: "Start sandbox" })).toBeEnabled();
+});
+
 test("a new thread from an occupied sandbox sets up its own sandbox, then sends", async () => {
   const before = await sandboxIds();
   await page
@@ -162,7 +203,59 @@ test("a new thread from an occupied sandbox sets up its own sandbox, then sends"
   await expect(threadRows()).toHaveCount(2);
 });
 
+test("cancelling a sandbox's setup deletes it and keeps the message", async () => {
+  const before = await sandboxIds();
+  await page.goto(secondThreadUrl);
+  await page
+    .getByRole("button", { name: /^New thread/ })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/draft\//);
+  const draftUrl = page.url();
+  await composer().click();
+  await page.keyboard.type(PROMPT);
+  await page.getByRole("button", { name: "Submit message" }).click();
+  await expect(page.getByText(`Setting up a sandbox for ${REPO}`)).toBeVisible();
+  await expect.poll(async () => (await sandboxesSince(before)).length).toBe(1);
+
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByText(`Setting up a sandbox for ${REPO}`)).toBeHidden();
+  await expect(composer()).toContainText(PROMPT);
+  expect(page.url()).toBe(draftUrl);
+  await expect.poll(async () => (await sandboxesSince(before)).length).toBe(0);
+});
+
 test("an asleep sandbox wakes when its thread is opened", async () => {
+  const sandbox = (await sandboxes()).find(
+    (candidate) => candidate.environmentId === environmentOf(firstThreadUrl),
+  );
+  expect(sandbox).toBeDefined();
+  // Opened while running, so this browser caches its messages.
+  await page.goto(firstThreadUrl);
+  await expect(assistantMessages().last()).toContainText(mockAvailable ? MOCK_REPLY : /\S/);
+  await expect.poll(() => threadCached(firstThreadUrl)).toBe(true);
+  await page.goto("/");
+  const slept = await (await page.request.post(`/api/sandboxes/${sandbox!.threadId}/sleep`)).json();
+  expect(slept.status).toBe("asleep");
+
+  await page.goto(firstThreadUrl);
+  const waking = page.getByText("Waking the sandbox…");
+  await expect(waking).toBeVisible();
+  // The transcript reads from the cache while the sandbox comes back.
+  await expect(assistantMessages().last()).toContainText(mockAvailable ? MOCK_REPLY : /\S/, {
+    timeout: 5000,
+  });
+  await expect(waking).toBeVisible();
+  await expect(waking).toBeHidden({ timeout: BOOT_TIMEOUT });
+  await expect
+    .poll(async () => (await sandboxes()).find((entry) => entry.threadId === sandbox!.threadId))
+    .toMatchObject({ status: "running" });
+  await expect(threadRows()).toHaveCount(2);
+});
+
+test("a browser that has never seen an asleep sandbox wakes it to list its thread", async ({
+  browser,
+}) => {
   const sandbox = (await sandboxes()).find(
     (candidate) => candidate.environmentId === environmentOf(firstThreadUrl),
   );
@@ -171,15 +264,18 @@ test("an asleep sandbox wakes when its thread is opened", async () => {
   const slept = await (await page.request.post(`/api/sandboxes/${sandbox!.threadId}/sleep`)).json();
   expect(slept.status).toBe("asleep");
 
-  await page.goto(firstThreadUrl);
-  // The transcript reads from the cache while the sandbox comes back.
-  await expect(assistantMessages().last()).toContainText(mockAvailable ? MOCK_REPLY : /\S/);
-  await expect(page.getByText("Waking the sandbox…")).toBeVisible();
-  await expect(page.getByText("Waking the sandbox…")).toBeHidden({ timeout: BOOT_TIMEOUT });
-  await expect
-    .poll(async () => (await sandboxes()).find((entry) => entry.threadId === sandbox!.threadId))
-    .toMatchObject({ status: "running" });
-  await expect(threadRows()).toHaveCount(2);
+  // No cached thread list and no record of having synced it.
+  const context = await browser.newContext();
+  try {
+    const fresh = await context.newPage();
+    await fresh.goto("/");
+    await expect(threadRows(fresh)).toHaveCount(2, { timeout: BOOT_TIMEOUT });
+    await expect
+      .poll(async () => (await sandboxes()).find((entry) => entry.threadId === sandbox!.threadId))
+      .toMatchObject({ status: "running" });
+  } finally {
+    await context.close();
+  }
 });
 
 test("deleting a thread deletes its sandbox", async () => {

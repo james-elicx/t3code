@@ -15,7 +15,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { waitForProject } from "../state/entities";
-import { createSandbox, getSandbox, newSandboxId } from "./directory";
+import { createSandbox, deleteSandbox, getSandbox, newSandboxId } from "./directory";
 
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 const LAST_REPO_KEY = "t3code:sandbox:last-repo";
@@ -54,14 +54,20 @@ export function SandboxLauncher() {
     }
   };
 
+  // A sandbox that did not start would only linger; starting again makes a new one.
+  const fail = useEffectEvent((sandboxId: string, message: string) => {
+    setPhase({ kind: "failed", message });
+    void deleteSandbox(sandboxId).catch(() => undefined);
+  });
+
   // Connected once the sandbox's project arrives; open a new thread in it.
-  const openThread = useEffectEvent(async (ref: ScopedProjectRef) => {
+  const openThread = useEffectEvent(async (sandboxId: string, ref: ScopedProjectRef) => {
     setPhase({ kind: "connecting", projectRef: ref });
     try {
       await waitForProject(ref, CONNECT_TIMEOUT_MS);
       await handleNewThread(ref, { replace: true });
     } catch {
-      setPhase({ kind: "failed", message: "It started, but this app could not connect to it." });
+      fail(sandboxId, "It started, but this app could not connect to it.");
     }
   });
 
@@ -74,9 +80,10 @@ export function SandboxLauncher() {
       try {
         const entry = await getSandbox(sandboxId);
         if (cancelled) return;
-        if (entry.lastError) setPhase({ kind: "failed", message: entry.lastError });
+        if (entry.lastError) fail(sandboxId, entry.lastError);
         else if (entry.environmentId) {
           void openThread(
+            sandboxId,
             scopeProjectRef(
               EnvironmentId.make(entry.environmentId),
               ProjectId.make(entry.projectId),

@@ -229,7 +229,8 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (Date.now() - this.lastActivityWrite < ACTIVITY_WRITE_INTERVAL_MS) return;
     this.lastActivityWrite = Date.now();
     const record = await this.record();
-    if (!record) return;
+    // A deleted sandbox's container that the runtime restarted after its delete.
+    if (!record) return this.destroyContainer("deleted");
     record.lastActivityAt = new Date().toISOString();
     await this.save(record);
   }
@@ -280,7 +281,7 @@ export class ThreadSandbox extends DurableObject<Env> {
   async destroy(): Promise<void> {
     const record = await this.record();
     this.destroyed = true;
-    if (this.container.running) await this.container.destroy("deleted");
+    await this.destroyContainer("deleted");
     this.booting = null;
     this.t3Ready = false;
     if (record) {
@@ -436,6 +437,15 @@ export class ThreadSandbox extends DurableObject<Env> {
     return fresh;
   }
 
+  /**
+   * Destroys the container even when it is not running. The local runtime
+   * restarts a container that exited with an error, so one deleted between
+   * restarts comes back; its first egress request destroys it again.
+   */
+  private async destroyContainer(reason: string) {
+    await this.container.destroy(reason).catch(() => {});
+  }
+
   /** Starts the container if needed and resolves with the T3 bearer token once T3 answers. */
   private ready(): Promise<string> {
     if (this.booting && this.container.running) return this.booting;
@@ -443,7 +453,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.booting = null;
       this.t3Ready = false;
       // The next attempt starts clean rather than finding a half-booted container.
-      if (this.container.running) await this.container.destroy("boot failed").catch(() => {});
+      await this.destroyContainer("boot failed");
       const record = await this.record();
       if (record) {
         record.lastError = String(error);
