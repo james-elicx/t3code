@@ -1,0 +1,27 @@
+apps/web/src/components/CommandPalette.tsx
+  s_927e0e23985343::t_670d231c5ba144 237,915,919-920,945,1740,1743,1868-1869
+apps/web/src/components/LegacySidebar.tsx
+  s_927e0e23985343::t_50bbbb6fbdcfa6 129,1204-1207
+apps/web/src/components/settings/ProjectSettingsPanel.tsx
+  s_927e0e23985343::t_c87aad65e81fa9 30,190-193
+apps/web/src/sandboxes/projectDelete.ts
+  s_927e0e23985343::t_971b44179c220f 1-34
+infra/sandbox-control/e2e/sandbox-thread.e2e.ts
+  s_927e0e23985343::t_cb3d3e65b2cde6 336-353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2b29898096576ac137f5aa5793bccf0b41ed0d15",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
