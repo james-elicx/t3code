@@ -1,0 +1,41 @@
+apps/web/src/components/ChatView.tsx
+  s_927e0e23985343::t_0477258ddf8bdb 11599-11600,11604
+apps/web/src/hooks/useHandleNewThread.ts
+  s_927e0e23985343::t_121a35d47ab438 40,164-165
+apps/web/src/sandboxes/directory.ts
+  s_927e0e23985343::t_1d20ec7a3433f8 278-292
+apps/web/src/sandboxes/registrations.ts
+  s_927e0e23985343::t_67544d46e72558 11,15,21-27,37-38,68-110
+apps/web/src/sandboxes/seed.ts
+  s_927e0e23985343::t_cc2dbbbcb60024 5,119-123
+infra/sandbox-control/README.md
+  s_927e0e23985343::t_fe0fceffdd76bb 104
+infra/sandbox-control/cloudflare.config.ts
+  s_927e0e23985343::t_90bd24262f4ab1 39-41
+infra/sandbox-control/e2e/sandbox-thread.e2e.ts
+  s_927e0e23985343::t_466cc124c1816f 6-13,34,37,55,62-66,87,96-98,100-101,133-147,151-160,162,164-172,175-203,207,209-210,212-215,217-224,226-228,249,255
+infra/sandbox-control/scripts/e2e.ts
+  s_927e0e23985343::t_1ba88bf5b92ee2 543,548
+infra/sandbox-control/scripts/mock-upstream.ts
+  s_927e0e23985343::t_8fbe7aa14f75e1 8-9,291-298
+infra/sandbox-control/src/SandboxDirectory.ts
+  s_927e0e23985343::t_c2bda26c25377f 43-55,111-115
+infra/sandbox-control/src/worker.ts
+  s_927e0e23985343::t_aa7835305eb579 6,78-79,84,158-203,207,223-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fed68dc1dbbd7a344fe2991d776c1d817ba31c91",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
