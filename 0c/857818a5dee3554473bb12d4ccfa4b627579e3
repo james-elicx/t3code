@@ -1,0 +1,25 @@
+apps/web/index.html
+  s_927e0e23985343::t_367f1df6e31039 12
+infra/sandbox-control/README.md
+  s_927e0e23985343::t_8c66ef69118ea5 183,188,193-196,210,216
+infra/sandbox-control/cloudflare.config.ts
+  s_927e0e23985343::t_aee8d212ef31f3 1-2,32,51-71
+infra/sandbox-control/package.json
+  s_927e0e23985343::t_9ef00908d49d60 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0c857818a5dee3554473bb12d4ccfa4b627579e3",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
