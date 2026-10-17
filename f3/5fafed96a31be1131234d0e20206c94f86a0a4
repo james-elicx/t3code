@@ -1,0 +1,29 @@
+apps/web/src/sandboxes/SandboxLauncher.tsx
+  s_927e0e23985343::t_d5cfe38c5ef196 18,57-62,64,70,83,86
+apps/web/src/sandboxes/preparation.test.ts
+  s_927e0e23985343::t_f12c2b2904f2aa 86-104
+apps/web/src/sandboxes/preparation.ts
+  s_927e0e23985343::t_b5697f52d9b721 169-173
+infra/sandbox-control/README.md
+  s_927e0e23985343::t_95bc27be019a6a 64-66
+infra/sandbox-control/e2e/sandbox-thread.e2e.ts
+  s_927e0e23985343::t_0fdbb93aef913b 9-11,66,69-72,92-118,167-178,206-227,233-236,242-243,245-249,256-280
+infra/sandbox-control/src/ThreadSandbox.ts
+  s_927e0e23985343::t_8d860edbb17c0f 232-233,284,440-448,456
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f35fafed96a31be1131234d0e20206c94f86a0a4",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
