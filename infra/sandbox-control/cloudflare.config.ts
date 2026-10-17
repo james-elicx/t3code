@@ -1,3 +1,5 @@
+import * as NodeFS from "node:fs";
+
 import { bindings, defineConfig, defineContainer, exports } from "cf/config";
 
 /**
@@ -27,6 +29,7 @@ function deployedVars() {
     if (!value) throw new Error(`--mode test needs ${name} in the environment.`);
     return value;
   };
+  assertWebBuiltFor(required("SANDBOX_APP_URL"));
   return {
     AI_GATEWAY_BASE_URL: aiGatewayBaseUrl(required("SANDBOX_AI_GATEWAY_URL")),
     GITHUB_ORIGIN: "https://github.com",
@@ -43,6 +46,27 @@ function deployedVars() {
     ACCESS_TEAM_DOMAIN: process.env.SANDBOX_ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "") ?? "",
     ACCESS_AUD: process.env.SANDBOX_ACCESS_AUD?.trim() ?? "",
   };
+}
+
+/**
+ * The web client is built for one origin: anywhere else it takes the Worker for
+ * a T3 server and fails to load. `.web-dist` is shared with local builds, so a
+ * deploy checks it was built for the origin it serves (`deploy:test` builds it).
+ */
+function assertWebBuiltFor(appUrl: string) {
+  const origin = new URL(appUrl).origin;
+  const assets = new URL("./.web-dist/assets/", import.meta.url);
+  const built =
+    NodeFS.existsSync(assets) &&
+    NodeFS.readdirSync(assets).some(
+      (file) =>
+        file.endsWith(".js") && NodeFS.readFileSync(new URL(file, assets), "utf8").includes(origin),
+    );
+  if (!built) {
+    throw new Error(
+      `.web-dist was not built for ${origin}. Run SANDBOX_APP_URL=${origin} vp run build:web.`,
+    );
+  }
 }
 
 /**

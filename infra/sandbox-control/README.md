@@ -180,16 +180,19 @@ for them.
    gateway's token. Create a
    write PAT for pushes and PRs. A read PAT is optional: without one, the session repository is
    fetched anonymously, so only public repos work.
-2. **The web build for the workers.dev origin:**
-   `SANDBOX_APP_URL=https://t3-sandbox-control.<subdomain>.workers.dev vp run build:web`.
-3. **Deploy.** Put `AI_GATEWAY_TOKEN`, `GITHUB_WRITE_PAT` and `GITHUB_READ_PAT` in a secrets file
+2. **Deploy.** Put `AI_GATEWAY_TOKEN`, `GITHUB_WRITE_PAT` and `GITHUB_READ_PAT` in a secrets file
    outside the repo, then:
 
    ```sh
    CLOUDFLARE_ACCOUNT_ID=<worker account> \
+   SANDBOX_APP_URL=https://t3-sandbox-control.<subdomain>.workers.dev \
    SANDBOX_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<gateway account>/<gateway> \
      vp run deploy:test --secrets-file <file>
    ```
+
+   `deploy:test` builds the web client for `SANDBOX_APP_URL` first. The client is built for one
+   origin and fails to load anywhere else, so a deploy refuses a `.web-dist` built for another
+   (such as a local build for `localhost:8787`).
 
    Leave `GITHUB_READ_PAT` empty to go without one. `DEBUG_EXEC` is off.
 
@@ -204,13 +207,13 @@ for them.
    lifecycle rule that aborts incomplete multipart uploads after a day: a backup interrupted by a
    restart leaves one behind.
 
-4. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
+3. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
    `t3-sandbox-control.<subdomain>.workers.dev`, with an Allow policy for the people who should
    use it. Use a hostname application, not the Worker's "Protect this Worker behind Access"
    toggle: Worker-level Access rejects WebSocket upgrades, and the client talks to each sandbox
    over a WebSocket. Version preview URLs are off in the config, so the workers.dev hostname is
    the only one.
-5. **Point the Worker at that application.** Copy the application's AUD tag and the team domain,
+4. **Point the Worker at that application.** Copy the application's AUD tag and the team domain,
    then deploy again with
    `SANDBOX_ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com SANDBOX_ACCESS_AUD=<aud>` added.
 

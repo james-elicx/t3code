@@ -5,7 +5,7 @@
   "scripts": {
     "build:web": "cd ../../apps/web && VITE_HOSTED_APP_URL=${SANDBOX_APP_URL:-http://localhost:8787} VITE_SANDBOX_DIRECTORY_URL=/api/sandboxes vp build --outDir ../../infra/sandbox-control/.web-dist --emptyOutDir",
     "dev": "cf dev",
-    "deploy:test": "cf deploy --mode test",
+    "deploy:test": "vp run build:web && cf deploy --mode test",
     "stage": "node scripts/stage-t3.ts",
     "mock": "node scripts/mock-upstream.ts",
     "e2e": "node scripts/e2e.ts",
