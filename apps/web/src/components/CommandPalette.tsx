@@ -234,7 +234,7 @@ import { Button } from "./ui/button";
 import { Kbd, KbdGroup } from "./ui/kbd";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { isSandboxMode } from "../sandboxes/directory";
+import { isSandboxMode, useSandboxEnvironmentIds } from "../sandboxes/directory";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
@@ -912,9 +912,12 @@ function OpenCommandPaletteDialog(props: {
     [projectPickerEntries],
   );
 
+  const sandboxEnvironmentIds = useSandboxEnvironmentIds();
   const addProjectEnvironmentOptions = useMemo(() => {
     const options = environments
       .filter((environment) => canCreateProjectInEnvironment(environment.connection.phase))
+      // A sandbox holds its one repository; repositories are added from GitHub instead.
+      .filter((environment) => !sandboxEnvironmentIds.includes(environment.environmentId))
       .map((environment): AddProjectEnvironmentOption => {
         const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
         return {
@@ -939,7 +942,7 @@ function OpenCommandPaletteDialog(props: {
     });
 
     return options;
-  }, [environments]);
+  }, [environments, sandboxEnvironmentIds]);
   const defaultAddProjectEnvironmentId =
     addProjectEnvironmentOptions.find((option) => option.isConnected)?.environmentId ?? null;
   const wslAddProjectEnvironmentOption = useMemo(
@@ -1734,10 +1737,10 @@ function OpenCommandPaletteDialog(props: {
 
   const openAddProjectFlow = useCallback(() => {
     // With no connected environment there is nothing to browse, so the only
-    // useful next step is connecting one.
+    // useful next step is connecting one, or with sandboxes, naming a repository.
     if (addProjectEnvironmentOptions.length === 0) {
       setOpen(false);
-      void navigate({ to: "/settings/connections" });
+      void navigate({ to: isSandboxMode() ? "/sandbox" : "/settings/connections" });
       return;
     }
 
@@ -1862,8 +1865,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:sandbox-from-repo",
-      searchTerms: ["new thread", "sandbox", "repository", "repo", "github"],
-      title: "Start from a GitHub repo…",
+      searchTerms: ["add project", "new thread", "sandbox", "repository", "repo", "github"],
+      title: "Add a GitHub repository…",
       icon: <BoxIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         await navigate({ to: "/sandbox", search: {} });

@@ -27,6 +27,7 @@ import {
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
+import { useSandboxProjectDelete } from "../../sandboxes/projectDelete";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -186,9 +187,10 @@ function ProjectDetail({
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     reportFailure: false,
   });
-  const deleteProject = useOrchestrationCommand(projectEnvironment.delete, {
-    reportFailure: false,
-  });
+  // A sandbox's project goes with its sandbox, through the control plane.
+  const deleteProject = useSandboxProjectDelete(
+    useOrchestrationCommand(projectEnvironment.delete, { reportFailure: false }),
+  );
   const projectNameEditedRef = useRef(false);
 
   const faviconPath = representative.faviconPath ?? null;

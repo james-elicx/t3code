@@ -333,3 +333,21 @@ test("deleting a thread deletes its sandbox", async () => {
     .toBe(false);
   await expect(threadRows()).toHaveCount(1);
 });
+
+test("removing the project removes it, and its sandboxes, from the control plane", async () => {
+  await page.goto("/settings/projects");
+  await page.getByRole("button", { name: /^Project scope: / }).click();
+  await page.getByRole("menuitemradio", { name: new RegExp(`${REPO_NAME}$`) }).click();
+  await page.getByRole("button", { name: /^Remove (project|all entries)$/ }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: /^(Confirm|Remove|Delete)$/ })
+    .click();
+
+  await expect.poll(projects).not.toContain(REPO.toLowerCase());
+  await expect
+    .poll(async () => (await sandboxes()).filter((entry) => entry.repo === REPO))
+    .toEqual([]);
+  await page.goto("/");
+  await expect(threadRows()).toHaveCount(0);
+});

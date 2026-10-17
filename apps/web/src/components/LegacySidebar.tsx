@@ -126,6 +126,7 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
+import { useSandboxProjectDelete } from "../sandboxes/projectDelete";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
@@ -1200,9 +1201,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     (settings) => settings.confirmThreadArchive,
   );
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const deleteProject = useOrchestrationCommand(projectEnvironment.delete, {
-    reportFailure: false,
-  });
+  // A sandbox's project goes with its sandbox, through the control plane.
+  const deleteProject = useSandboxProjectDelete(
+    useOrchestrationCommand(projectEnvironment.delete, { reportFailure: false }),
+  );
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     reportFailure: false,
   });
