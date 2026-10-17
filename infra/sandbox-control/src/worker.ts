@@ -177,30 +177,28 @@ async function serverConfigApi(
   return text(405, "Use GET.");
 }
 
-/** Why the control plane's read token can't use the repository, or null when it can. */
+/**
+ * Why a sandbox couldn't clone the repository, or null when it can. Asks git's
+ * smart HTTP endpoint, as the clone does, rather than the REST API: without a
+ * token that allows 60 requests an hour per IP, which Workers' shared IPs use up.
+ */
 async function unreadableRepository(env: Env, repo: string): Promise<string | null> {
-  const authorization = githubAuthorization("api.github.com", env.GITHUB_READ_PAT);
-  const response = await fetch(`${env.GITHUB_API_ORIGIN}/repos/${repo}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "t3-sandbox-control",
-      ...(authorization ? { authorization } : {}),
+  const authorization = githubAuthorization("github.com", env.GITHUB_READ_PAT);
+  const response = await fetch(
+    `${env.GITHUB_ORIGIN}/${repo}.git/info/refs?service=git-upload-pack`,
+    {
+      headers: {
+        "user-agent": "git/2 (t3-sandbox-control)",
+        ...(authorization ? { authorization } : {}),
+      },
     },
-  });
-  if (response.ok) {
-    await response.body?.cancel();
-    return null;
-  }
-  if (response.status === 404) {
-    await response.body?.cancel();
-    return `No GitHub repository ${repo} that the control plane's token can read.`;
-  }
-  // GitHub says why, e.g. SAML SSO the token isn't authorized for, or a rate limit.
-  const reason = await response
-    .json<{ message?: unknown }>()
-    .then((body) => (typeof body.message === "string" ? ` ${body.message}` : ""))
-    .catch(() => "");
-  return `GitHub answered HTTP ${response.status} for ${repo}.${reason}`;
+  );
+  await response.body?.cancel();
+  if (response.ok) return null;
+  // GitHub answers a missing repository, or one the token can't read, with 401 or 404.
+  return response.status === 401 || response.status === 403 || response.status === 404
+    ? `No GitHub repository ${repo} that the control plane can read.`
+    : `GitHub answered HTTP ${response.status} for ${repo}.`;
 }
 
 /** Projects: a GitHub repository each, with an unstarted sandbox ready for its next thread. */
