@@ -1,4 +1,4 @@
-import type { DirectoryBackupGatewayBinding } from "@cloudflare/sandbox";
+import type { DirectoryBackupGatewayBinding, S3GatewayBinding } from "@cloudflare/sandbox";
 
 import type { SandboxDirectory } from "./SandboxDirectory.ts";
 import type { ThreadSandbox } from "./ThreadSandbox.ts";
@@ -30,6 +30,16 @@ export interface Env {
   readonly SLEEP_AFTER_MS: string;
   /** How often an awake sandbox's lifecycle alarm runs, in ms. */
   readonly LIFECYCLE_TICK_MS: string;
+  /**
+   * The bucket every sandbox mounts read-only at /shared (skills and memories),
+   * through R2's S3 API; without all three there is no mount. The keys stay in the Worker,
+   * which signs each request.
+   */
+  readonly SHARED_S3_ENDPOINT: string;
+  readonly SHARED_S3_REGION: string;
+  readonly SHARED_BUCKET: string;
+  readonly SHARED_S3_ACCESS_KEY_ID: string;
+  readonly SHARED_S3_SECRET_ACCESS_KEY: string;
 }
 
 export interface EgressProps {
@@ -45,6 +55,7 @@ export interface ControlPlaneExports {
   readonly ThreadSandbox: DurableObjectNamespace<ThreadSandbox>;
   readonly SandboxDirectory: DurableObjectNamespace<SandboxDirectory>;
   readonly DirectoryBackupGateway: DirectoryBackupGatewayBinding;
+  readonly S3Gateway: S3GatewayBinding;
   Egress(options: { props: EgressProps }): Fetcher;
 }
 

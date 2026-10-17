@@ -11,6 +11,11 @@
  *
  * Every request is recorded with its headers. `GET /__recorded` returns them,
  * `DELETE /__recorded` clears them, and `GET /__refs` lists the bare repo's refs.
+ *
+ * A second port (MOCK_S3_PORT, 8791) stands in for R2's S3 API with the reads
+ * s3fs makes, over a seeded directory of shared skills and memories; any bucket
+ * name serves it. `PUT /__shared/<key>` on the first port adds or replaces an
+ * object there. S3 requests are recorded too, under the path `s3:/...`.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -48,6 +53,22 @@ git(
 );
 git("-C", seed, "push", "--quiet", bare, "main");
 
+const s3Port = Number(process.env.MOCK_S3_PORT ?? 8791);
+const shared = NodePath.join(root, "shared");
+const SHARED_SEED: Record<string, string> = {
+  "skills/sandbox-conventions/SKILL.md":
+    "---\nname: sandbox-conventions\ndescription: How work is done in a T3 sandbox.\n---\n\nPush to the sandbox's own branch only.\n",
+  "memories/MEMORY.md": "- [Demo repo](demo-repo.md) — acme/demo is the mock repository\n",
+  "memories/demo-repo.md": "acme/demo is seeded by the sandbox mock upstream.\n",
+};
+const writeShared = (key: string, content: Buffer | string) => {
+  const file = NodePath.join(shared, key);
+  if (!file.startsWith(`${shared}/`)) throw new Error(`bad key ${key}`);
+  NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+  NodeFS.writeFileSync(file, content);
+};
+for (const [key, content] of Object.entries(SHARED_SEED)) writeShared(key, content);
+
 interface Recorded {
   readonly at: string;
   readonly method: string;
@@ -67,7 +88,7 @@ const readBody = async (request: NodeHttp.IncomingMessage) => {
   return Buffer.concat(chunks);
 };
 
-const record = (request: NodeHttp.IncomingMessage, body: Buffer) => {
+const record = (request: NodeHttp.IncomingMessage, body: Buffer, path = request.url ?? "/") => {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {
     headers[name] = Array.isArray(value) ? value.join(", ") : (value ?? "");
@@ -83,7 +104,7 @@ const record = (request: NodeHttp.IncomingMessage, body: Buffer) => {
   recorded.push({
     at: new Date().toISOString(),
     method: request.method ?? "GET",
-    path: request.url ?? "/",
+    path,
     headers,
     body: printable
       ? new TextDecoder().decode(body.subarray(0, 2048))
@@ -229,6 +250,13 @@ const server = NodeHttp.createServer(async (request, response) => {
     if (request.method === "DELETE") recorded = [];
     return json(response, 200, recorded);
   }
+  if (url.pathname.startsWith("/__shared/") && request.method === "PUT") {
+    writeShared(
+      decodeURIComponent(url.pathname.slice("/__shared/".length)),
+      await readBody(request),
+    );
+    return json(response, 200, { ok: true });
+  }
   if (url.pathname === "/__refs") {
     const refs = git("-C", bare, "for-each-ref", "--format=%(refname) %(objectname)");
     return json(
@@ -267,4 +295,112 @@ const server = NodeHttp.createServer(async (request, response) => {
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`mock upstream listening on http://127.0.0.1:${port} (repos in ${root})`);
+});
+
+const sharedKeys = (dir = shared): string[] =>
+  NodeFS.readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) =>
+      entry.isDirectory()
+        ? sharedKeys(NodePath.join(dir, entry.name))
+        : [NodePath.relative(shared, NodePath.join(dir, entry.name))],
+    )
+    .toSorted();
+
+const xml = (value: string) => value.replace(/[<>&'"]/g, (char) => `&#${char.charCodeAt(0)};`);
+
+/** ListObjects (v1 and v2) over the shared directory, in one page. */
+function listObjects(url: URL) {
+  const prefix = url.searchParams.get("prefix") ?? "";
+  const delimiter = url.searchParams.get("delimiter") ?? "";
+  const v2 = url.searchParams.get("list-type") === "2";
+  const contents: string[] = [];
+  const prefixes = new Set<string>();
+  for (const key of sharedKeys()) {
+    if (!key.startsWith(prefix)) continue;
+    const rest = key.slice(prefix.length);
+    const cut = delimiter ? rest.indexOf(delimiter) : -1;
+    if (cut !== -1) {
+      prefixes.add(prefix + rest.slice(0, cut + delimiter.length));
+      continue;
+    }
+    const stat = NodeFS.statSync(NodePath.join(shared, key));
+    contents.push(
+      `<Contents><Key>${xml(key)}</Key><LastModified>${stat.mtime.toISOString()}</LastModified>` +
+        `<ETag>"${stat.mtimeMs.toString(16)}"</ETag><Size>${stat.size}</Size>` +
+        `<StorageClass>STANDARD</StorageClass></Contents>`,
+    );
+  }
+  const common = [...prefixes].map(
+    (p) => `<CommonPrefixes><Prefix>${xml(p)}</Prefix></CommonPrefixes>`,
+  );
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">` +
+    `<Name>shared</Name><Prefix>${xml(prefix)}</Prefix>` +
+    (v2 ? `<KeyCount>${contents.length + common.length}</KeyCount>` : "<Marker></Marker>") +
+    `<MaxKeys>1000</MaxKeys>${delimiter ? `<Delimiter>${xml(delimiter)}</Delimiter>` : ""}` +
+    `<IsTruncated>false</IsTruncated>${contents.join("")}${common.join("")}</ListBucketResult>`
+  );
+}
+
+const s3Server = NodeHttp.createServer(async (request, response) => {
+  const url = new URL(request.url ?? "/", "http://mock");
+  const body = await readBody(request);
+  record(request, body, `s3:${request.url}`);
+  const xmlResponse = (status: number, value: string) => {
+    response.writeHead(status, { "content-type": "application/xml" });
+    response.end(value);
+  };
+  const [, , ...keyParts] = url.pathname.split("/");
+  const key = decodeURIComponent(keyParts.join("/"));
+  const method = request.method ?? "GET";
+  if (method !== "GET" && method !== "HEAD") {
+    return xmlResponse(
+      403,
+      "<Error><Code>AccessDenied</Code><Message>read-only mock</Message></Error>",
+    );
+  }
+  if (key === "") {
+    if (method === "HEAD") return response.writeHead(200).end();
+    if (url.searchParams.has("location")) {
+      return xmlResponse(
+        200,
+        '<?xml version="1.0" encoding="UTF-8"?><LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">auto</LocationConstraint>',
+      );
+    }
+    return xmlResponse(200, listObjects(url));
+  }
+  const file = NodePath.join(shared, key);
+  if (
+    !file.startsWith(`${shared}/`) ||
+    !NodeFS.statSync(file, { throwIfNoEntry: false })?.isFile()
+  ) {
+    if (method === "HEAD") return response.writeHead(404).end();
+    return xmlResponse(404, "<Error><Code>NoSuchKey</Code></Error>");
+  }
+  const content = NodeFS.readFileSync(file);
+  const stat = NodeFS.statSync(file);
+  const headers = {
+    "content-type": "application/octet-stream",
+    "last-modified": stat.mtime.toUTCString(),
+    etag: `"${stat.mtimeMs.toString(16)}"`,
+    "accept-ranges": "bytes",
+  };
+  const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+  if (range) {
+    const start = Number(range[1]);
+    const end = Math.min(range[2] ? Number(range[2]) : content.length - 1, content.length - 1);
+    const part = content.subarray(start, end + 1);
+    response.writeHead(206, {
+      ...headers,
+      "content-length": part.length,
+      "content-range": `bytes ${start}-${end}/${content.length}`,
+    });
+    return response.end(method === "HEAD" ? undefined : part);
+  }
+  response.writeHead(200, { ...headers, "content-length": content.length });
+  response.end(method === "HEAD" ? undefined : content);
+});
+
+s3Server.listen(s3Port, "127.0.0.1", () => {
+  console.log(`mock S3 listening on http://127.0.0.1:${s3Port} (shared objects in ${shared})`);
 });

@@ -4,6 +4,7 @@ FROM node:24-trixie-slim
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates curl git netcat-openbsd procps \
+    fuse3 s3fs \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/t3
@@ -20,8 +21,9 @@ RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.301 
 RUN npm install --global --no-audit --no-fund pnpm@11.1.1 vite-plus@1.1.0 \
   && node --version && pnpm --version && vp --version
 
-# Moves directory backups between the container and R2 for the control plane.
-# The tag matches @cloudflare/sandbox in package.json.
+# Moves directory backups between the container and R2, and mounts the shared
+# bucket (with s3fs above), for the control plane. The tag matches
+# @cloudflare/sandbox in package.json.
 COPY --from=docker.io/cloudflare/sandbox:1.0.1 /usr/local/bin/sandbox-shim /usr/local/bin/sandbox-shim
 
 # This branch's server bundle, staged by `vp run stage` (scripts/stage-t3.ts).

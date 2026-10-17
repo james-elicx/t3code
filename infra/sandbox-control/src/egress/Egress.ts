@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { controlPlane, type EgressProps, type Env } from "../env.ts";
+import { sharedGateway } from "../sharedMount.ts";
 import { toAiGatewayRequest } from "./anthropic.ts";
 import { decideGraphql } from "./githubGraphql.ts";
 import {
@@ -25,6 +26,8 @@ import { PktLineError, readReceivePackCommands, receivePackRejection } from "./p
 export class Egress extends WorkerEntrypoint<Env, EgressProps> {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const shared = sharedGateway(this.env, controlPlane(this.ctx), url.hostname);
+    if (shared) return shared.fetch(request);
     // Egress is how the control plane knows the agent is working (see lifecycle.ts).
     this.ctx.waitUntil(
       controlPlane(this.ctx)

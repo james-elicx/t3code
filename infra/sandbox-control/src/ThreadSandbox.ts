@@ -1,4 +1,4 @@
-import { DirectoryBackup, type DirectoryBackupRecord } from "@cloudflare/sandbox";
+import { DirectoryBackup, type DirectoryBackupRecord, S3Mount } from "@cloudflare/sandbox";
 import { DurableObject } from "cloudflare:workers";
 
 import { controlPlane, type Env } from "./env.ts";
@@ -10,6 +10,7 @@ import {
   type RecordedPullRequest,
   type SandboxSession,
 } from "./session.ts";
+import { sharedMount } from "./sharedMount.ts";
 import { bridgeWebSocket } from "./wsBridge.ts";
 
 /** The T3 server in the image listens here (see container/entrypoint.sh). */
@@ -18,8 +19,11 @@ const T3_BIN = ["node", "/opt/t3/dist/bin.mjs"];
 const T3_HOME = "/t3home";
 const SETTINGS_PATH = `${T3_HOME}/userdata/settings.json`;
 const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
-/** The entrypoint waits for this file while the control plane restores the T3 home. */
-const RESTORED_MARKER = "/run/t3-sandbox-restored";
+/**
+ * The entrypoint waits for this boot's token here while the control plane
+ * restores the T3 home and mounts the shared bucket.
+ */
+const PREPARED_MARKER = "/run/t3-sandbox-prepared";
 /** A backstop only: the alarm loop polls the T3 server every tick, which keeps it busy. */
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 const READY_TIMEOUT_MS = 180_000;
@@ -31,7 +35,7 @@ const SNAPSHOT_TTL_MS = 29 * 24 * 60 * 60 * 1000;
  * What the R2 backup leaves out of the T3 home. Worktrees are workspace, which
  * the container snapshot and the session branch carry; caches rebuild.
  */
-const BACKUP_EXCLUDE = ["/worktrees/", "/caches/", "/claude/shell-snapshots/"];
+const BACKUP_EXCLUDE = ["/worktrees/", "/caches/", "/claude/shell-snapshots/", "/claude/skills"];
 /** Sizes a sandbox may ask for. One today; the toggle will offer more. */
 export const SANDBOX_INSTANCES = ["standard-1"] as const;
 export type SandboxInstance = (typeof SANDBOX_INSTANCES)[number];
@@ -120,6 +124,7 @@ export interface ExecResult {
  */
 export class ThreadSandbox extends DurableObject<Env> {
   private readonly container: Container;
+  private readonly mounts: S3Mount;
   private booting: Promise<string> | null = null;
   /** True once the T3 server in the current container has answered. */
   private t3Ready = false;
@@ -133,6 +138,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     super(ctx, env);
     if (!ctx.container) throw new Error("ThreadSandbox needs a container binding.");
     this.container = ctx.container;
+    this.mounts = new S3Mount(ctx.container, controlPlane(ctx).S3Gateway);
     if (this.container.running) {
       // A restarted Durable Object (a deploy, or a dev reload) finds its container
       // still running. Intercepts registered by the previous code would route to
@@ -456,7 +462,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.t3Ready = false;
       this.settingsBaseline = null;
       const snapshot = this.usableSnapshot(record);
-      const restoreToken = randomId();
+      const preparedToken = randomId();
       await this.intercept(record);
       this.container.start({
         ...(snapshot ? { containerSnapshot: { id: snapshot } } : { image: this.image() }),
@@ -464,11 +470,8 @@ export class ThreadSandbox extends DurableObject<Env> {
         instance: record.instance,
         env: {
           ...this.sandboxEnv(record),
-          ...(record.backup
-            ? { T3_SANDBOX_RESTORE: restoreToken }
-            : record.settings
-              ? { T3_SANDBOX_SETTINGS: record.settings }
-              : {}),
+          T3_SANDBOX_PREPARED: preparedToken,
+          ...(!record.backup && record.settings ? { T3_SANDBOX_SETTINGS: record.settings } : {}),
         },
         labels: { thread: record.threadId.slice(0, 64) },
       });
@@ -477,20 +480,22 @@ export class ThreadSandbox extends DurableObject<Env> {
       if (record.backup) {
         this.phase = "restoring";
         await this.save(record);
-        try {
-          await this.untilExecutable().catch(async (error: unknown) => {
-            // A snapshot past its TTL or from a replaced image does not start;
-            // the next boot uses the image, the R2 backup and the session branch.
-            if (snapshot) {
-              delete record.snapshot;
-              await this.save(record);
-            }
-            throw error;
-          });
-          await this.restoreHome(record, record.backup, restoreToken);
-        } finally {
-          this.phase = null;
-        }
+      }
+      try {
+        await this.untilExecutable().catch(async (error: unknown) => {
+          // A snapshot past its TTL or from a replaced image does not start;
+          // the next boot uses the image, the R2 backup and the session branch.
+          if (snapshot) {
+            delete record.snapshot;
+            await this.save(record);
+          }
+          throw error;
+        });
+        if (record.backup) await this.restoreHome(record, record.backup);
+        await this.mountShared();
+        await this.run(["sh", "-c", `printf %s "$0" > ${PREPARED_MARKER}`, preparedToken]);
+      } finally {
+        this.phase = null;
       }
       delete record.lastError;
       await this.save(record);
@@ -514,10 +519,22 @@ export class ThreadSandbox extends DurableObject<Env> {
    * directory the image or snapshot holds fails on an overlay root (EXDEV), so
    * the old copy goes first; T3 has not started, so nothing holds it open.
    */
-  private async restoreHome(record: SandboxRecord, backup: DirectoryBackupRecord, token: string) {
+  private async restoreHome(record: SandboxRecord, backup: DirectoryBackupRecord) {
     await this.run(["rm", "-rf", T3_HOME]);
     await this.backups(record).restore(backup, { dir: T3_HOME });
-    await this.run(["sh", "-c", `printf %s "$0" > ${RESTORED_MARKER}`, token]);
+  }
+
+  /**
+   * The shared bucket at /shared, for the entrypoint to hand to Claude. The
+   * Worker signs its requests, so the keys never enter the sandbox. A failed
+   * mount leaves the sandbox without it rather than down.
+   */
+  private async mountShared() {
+    const mount = sharedMount(this.env);
+    if (!mount) return;
+    await this.mounts.mount(mount).catch((error: unknown) => {
+      console.error("mounting the shared bucket failed", String(error));
+    });
   }
 
   /**

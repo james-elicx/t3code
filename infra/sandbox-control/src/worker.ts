@@ -5,7 +5,7 @@ import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
 import type { CreateSandboxInput, SandboxSummary } from "./ThreadSandbox.ts";
 
-export { DirectoryBackupGateway } from "@cloudflare/sandbox";
+export { DirectoryBackupGateway, S3Gateway } from "@cloudflare/sandbox";
 export { Egress } from "./egress/Egress.ts";
 export { SandboxDirectory } from "./SandboxDirectory.ts";
 export { ThreadSandbox } from "./ThreadSandbox.ts";

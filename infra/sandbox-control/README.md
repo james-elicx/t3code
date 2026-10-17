@@ -46,7 +46,7 @@ cd infra/sandbox-control
 cp .dev.vars.example .dev.vars            # placeholder secrets only
 vp run stage                              # copy the server bundle into container/
 vp run build:web                          # the web client in sandbox mode, served from /
-vp run mock                               # terminal 1: mock AI Gateway, GitHub and git (127.0.0.1:8790)
+vp run mock                               # terminal 1: mock AI Gateway, GitHub, git and S3 (127.0.0.1:8790, :8791)
 vp run dev                                # terminal 2: cf dev, builds the image on first start
 ```
 
@@ -100,6 +100,27 @@ Before any edit, new sandboxes use `container/sandbox-settings.json`. Secrets ar
 T3 keeps them under `secrets/`.
 
 Locally `SLEEP_AFTER_MS` is 20 seconds and the alarm runs every 5, so the proofs can watch it.
+
+## Shared skills and memories
+
+Every sandbox mounts one R2 bucket, `t3-sandbox-control-shared`, read-only at `/shared` with
+`S3Mount`. The bucket holds:
+
+```
+skills/<name>/SKILL.md      Claude Code skills, one directory each
+memories/MEMORY.md          the memory index, one line per memory linking its file
+memories/<memory>.md
+```
+
+The entrypoint links `/shared/skills` as Claude's skills directory (unless the sandbox has made its
+own) and imports `@/shared/memories/MEMORY.md` from Claude's `CLAUDE.md`; Claude reads the linked
+memories as it needs them. Objects added to the bucket show up in running sandboxes.
+
+The Worker signs the bucket's requests, so its keys never enter a sandbox. `S3Mount` registers its
+route after the catch-all egress intercept, which takes it, so `Egress` hands
+`s3-*.sandbox.internal` to `S3Gateway` itself (`src/sharedMount.ts`). Snapshots leave mounts out;
+every boot mounts the bucket again. Without `SHARED_S3_ENDPOINT` and both keys there is no mount,
+and a failed mount leaves the sandbox up without it. Locally the mock serves a seeded bucket.
 
 ## The web client in sandbox mode
 
@@ -169,6 +190,13 @@ for them.
    ```
 
    Leave `GITHUB_READ_PAT` empty to go without one. `DEBUG_EXEC` is off.
+
+   For shared skills and memories, create the R2 bucket `t3-sandbox-control-shared` and an R2 API
+   token with Object Read only, scoped to it. Add its keys to the secrets file as
+   `SHARED_S3_ACCESS_KEY_ID` and `SHARED_S3_SECRET_ACCESS_KEY`, and add
+   `SANDBOX_SHARED_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com` to the deploy
+   command. Without them, sandboxes have no `/shared`. Fill the bucket with
+   `wrangler r2 object put t3-sandbox-control-shared/<key> --file <file> --remote`.
 
    The R2 bucket `t3-sandbox-control-backups` must exist in the Worker's account. Give it a
    lifecycle rule that aborts incomplete multipart uploads after a day: a backup interrupted by a

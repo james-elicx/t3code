@@ -10,13 +10,13 @@ if [ -f "$CA" ]; then
   update-ca-certificates >/dev/null 2>&1 || echo "warning: could not update CA store" >&2
 fi
 
-# A waking sandbox: the control plane is putting the T3 home back from R2 and
-# writes this boot's token to the marker when it is done.
-if [ -n "${T3_SANDBOX_RESTORE:-}" ]; then
+# The control plane restores the T3 home of a waking sandbox and mounts the
+# shared bucket, then writes this boot's token to the marker.
+if [ -n "${T3_SANDBOX_PREPARED:-}" ]; then
   waited=0
-  until [ "$(cat /run/t3-sandbox-restored 2>/dev/null)" = "$T3_SANDBOX_RESTORE" ]; do
+  until [ "$(cat /run/t3-sandbox-prepared 2>/dev/null)" = "$T3_SANDBOX_PREPARED" ]; do
     if [ "$waited" -ge 6000 ]; then
-      echo "error: the T3 home was not restored" >&2
+      echo "error: the control plane did not prepare the sandbox" >&2
       exit 1
     fi
     sleep 0.1
@@ -35,6 +35,18 @@ if [ ! -f "$T3_HOME/userdata/settings.json" ]; then
   else
     cp /opt/t3/sandbox-settings.json "$T3_HOME/userdata/settings.json"
   fi
+fi
+
+# Shared skills and memories, read-only at /shared: Claude loads the skills and
+# imports the memory index, then reads the memories it links as it needs them.
+# A skills directory the sandbox made itself is left alone.
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+mkdir -p "$CLAUDE_DIR"
+if [ -d /shared/skills ] && { [ -L "$CLAUDE_DIR/skills" ] || [ ! -e "$CLAUDE_DIR/skills" ]; }; then
+  ln -sfn /shared/skills "$CLAUDE_DIR/skills"
+fi
+if [ -f /shared/memories/MEMORY.md ] && ! grep -qsF "@/shared/memories/MEMORY.md" "$CLAUDE_DIR/CLAUDE.md"; then
+  printf '\n# Shared memories (read-only)\n@/shared/memories/MEMORY.md\n' >> "$CLAUDE_DIR/CLAUDE.md"
 fi
 
 # The session repo, cloned through the egress broker. Work happens on the

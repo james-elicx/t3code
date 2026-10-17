@@ -34,6 +34,11 @@ function deployedVars() {
     DEBUG_EXEC: "0",
     SLEEP_AFTER_MS: String(10 * 60 * 1000),
     LIFECYCLE_TICK_MS: String(60 * 1000),
+    // R2's S3 API for the bucket below, https://<account-id>.r2.cloudflarestorage.com.
+    // Unset, sandboxes have no shared mount.
+    SHARED_S3_ENDPOINT: process.env.SANDBOX_SHARED_S3_ENDPOINT?.trim().replace(/\/+$/, "") ?? "",
+    SHARED_S3_REGION: "auto",
+    SHARED_BUCKET: `${WORKER_NAME}-shared`,
     // Until both are set, the Worker refuses every request: it serves loopback hosts only.
     ACCESS_TEAM_DOMAIN: process.env.SANDBOX_ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "") ?? "",
     ACCESS_AUD: process.env.SANDBOX_ACCESS_AUD?.trim() ?? "",
@@ -63,6 +68,10 @@ const localVars = {
   // Short, so proofs can watch a settled sandbox fall asleep.
   SLEEP_AFTER_MS: String(20 * 1000),
   LIFECYCLE_TICK_MS: String(5 * 1000),
+  // The mock's S3 API; the shared mount needs placeholder keys in `.dev.vars` too.
+  SHARED_S3_ENDPOINT: "http://127.0.0.1:8791",
+  SHARED_S3_REGION: "auto",
+  SHARED_BUCKET: `${WORKER_NAME}-shared`,
   ACCESS_TEAM_DOMAIN: "",
   ACCESS_AUD: "",
 };
@@ -98,6 +107,9 @@ export default defineConfig(({ mode }) => {
         AI_GATEWAY_TOKEN: bindings.secret(),
         GITHUB_WRITE_PAT: bindings.secret(),
         GITHUB_READ_PAT: bindings.secret(),
+        // An R2 API token's S3 keys, read-only and scoped to the shared bucket.
+        SHARED_S3_ACCESS_KEY_ID: bindings.secret(),
+        SHARED_S3_SECRET_ACCESS_KEY: bindings.secret(),
         // Sandboxes' T3 homes while they sleep, until the sandbox is deleted.
         BACKUPS: bindings.r2({ name: `${WORKER_NAME}-backups` }),
         // ThreadSandbox and SandboxDirectory are reached through ctx.exports, not

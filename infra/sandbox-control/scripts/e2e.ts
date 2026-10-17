@@ -190,6 +190,55 @@ async function main() {
     },
   );
 
+  // --- Shared skills and memories -------------------------------------------
+  await fetch(`${mock}/__recorded`, { method: "DELETE" });
+  const shared = await sh(`
+    C=$(tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^CLAUDE_CONFIG_DIR=//p')
+    echo "mount:   $(grep ' /shared ' /proc/mounts | cut -d' ' -f3,4 | cut -d, -f1)"
+    echo "memory:  $(cat /shared/memories/demo-repo.md)"
+    echo "skills:  $(readlink "$C/skills") -> $(ls "$C/skills")"
+    echo "skill:   $(sed -n 2p "$C/skills/sandbox-conventions/SKILL.md")"
+    echo "import:  $(grep -F @/shared/ "$C/CLAUDE.md")"
+    echo "write:   $(touch /shared/memories/x.md 2>/dev/null && echo allowed || echo refused)"
+  `);
+  const sharedCalls = (await recorded()).filter((request) => request.path.startsWith("s3:"));
+  check(
+    "the shared bucket is mounted read-only at /shared and handed to Claude",
+    /mount: +fuse\S* ro\n/.test(shared.stdout) &&
+      shared.stdout.includes("memory:  acme/demo is seeded by the sandbox mock upstream.") &&
+      shared.stdout.includes("skills:  /shared/skills -> sandbox-conventions") &&
+      shared.stdout.includes("skill:   name: sandbox-conventions") &&
+      shared.stdout.includes("import:  @/shared/memories/MEMORY.md") &&
+      shared.stdout.includes("write:   refused"),
+    shared.stdout + shared.stderr,
+  );
+  check(
+    "the Worker signs the bucket's requests with the real key, and no write reaches it",
+    sharedCalls.length > 0 &&
+      sharedCalls.every((request) =>
+        request.headers.authorization?.includes(`Credential=${secrets.SHARED_S3_ACCESS_KEY_ID}/`),
+      ) &&
+      sharedCalls.every((request) => request.method === "GET" || request.method === "HEAD"),
+    {
+      requests: sharedCalls.length,
+      methods: [...new Set(sharedCalls.map((request) => request.method))],
+      authorization: sharedCalls[0]?.headers.authorization?.replace(/Signature=\w+/, "Signature=…"),
+    },
+  );
+
+  await fetch(`${mock}/__shared/memories/added-later.md`, {
+    method: "PUT",
+    body: "Added to the bucket after the sandbox mounted it.\n",
+  });
+  const later = await sh(
+    "for i in $(seq 1 30); do cat /shared/memories/added-later.md 2>/dev/null && exit 0; sleep 1; done; exit 1",
+  );
+  check(
+    "objects added to the bucket later show up in running sandboxes",
+    later.exitCode === 0 && later.stdout.includes("after the sandbox mounted it"),
+    later.stdout.trim() || later.stderr.trim() || "(not visible after 30s)",
+  );
+
   // --- Anthropic through AI Gateway ---------------------------------------
   await fetch(`${mock}/__recorded`, { method: "DELETE" });
   const claude = await sh(
@@ -325,7 +374,13 @@ async function main() {
   );
 
   // --- Secrets and egress -------------------------------------------------
-  const values = [secrets.AI_GATEWAY_TOKEN, secrets.GITHUB_WRITE_PAT, secrets.GITHUB_READ_PAT];
+  const values = [
+    secrets.AI_GATEWAY_TOKEN,
+    secrets.GITHUB_WRITE_PAT,
+    secrets.GITHUB_READ_PAT,
+    secrets.SHARED_S3_ACCESS_KEY_ID,
+    secrets.SHARED_S3_SECRET_ACCESS_KEY,
+  ];
   const leak = await sh(
     `(env; tr '\\0' '\\n' < /proc/1/environ) | grep -F ${values.map((value) => `-e '${value}'`).join(" ")}; ` +
       `grep -rlF ${values.map((value) => `-e '${value}'`).join(" ")} / ` +
@@ -440,7 +495,9 @@ async function main() {
     const session = (await (await fetch(`${sandboxRoute}/api/auth/session`)).json()) as {
       authenticated: boolean;
     };
+    const shared = await sh("cat /shared/memories/demo-repo.md");
     return {
+      shared: shared.stdout.trim(),
       seconds: Math.round((Date.now() - started) / 1000),
       phases: phases.join(" → "),
       state: state.stdout.trim() + state.stderr,
@@ -448,14 +505,18 @@ async function main() {
     };
   };
   const t3Home = [environmentBefore, threadId];
+  // Snapshots leave mounts out, so every boot mounts the bucket again.
+  const sharedMemory = "acme/demo is seeded by the sandbox mock upstream.";
   const woken = await wake();
   check(
-    "wake restores the workspace from the snapshot and the T3 home from R2",
+    "wake restores the workspace from the snapshot, the T3 home from R2, and the shared mount",
     woken.state ===
       [`${branchPrefix}work`, `change from ${threadId}`, "draft", ...t3Home].join("\n") &&
-      woken.authenticated,
+      woken.authenticated &&
+      woken.shared === sharedMemory,
     `awake in ${woken.seconds}s via ${woken.phases}\n` +
-      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${woken.state}`,
+      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${woken.state}\n` +
+      `shared memory: ${woken.shared || "(not mounted)"}`,
   );
 
   // An expired snapshot: the image, the T3 home from R2, and the pushed session branch.
@@ -468,9 +529,12 @@ async function main() {
     rebuilt.state ===
       [`${branchPrefix}work`, `change from ${threadId}`, "(no uncommitted.txt)", ...t3Home].join(
         "\n",
-      ) && rebuilt.authenticated,
+      ) &&
+      rebuilt.authenticated &&
+      rebuilt.shared === sharedMemory,
     `awake in ${rebuilt.seconds}s via ${rebuilt.phases}\n` +
-      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${rebuilt.state}`,
+      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${rebuilt.state}\n` +
+      `shared memory: ${rebuilt.shared || "(not mounted)"}`,
   );
 
   clearInterval(viewing);
