@@ -1,0 +1,29 @@
+apps/server/src/orchestration-v2/ThreadMessageIntake.ts
+  s_927e0e23985343::t_711b791225cb5a 3-7,190-225
+apps/server/src/orchestration-v2/launchHttp.test.ts
+  s_927e0e23985343::t_75d30b05e511e3 1-130
+apps/server/src/orchestration-v2/launchHttp.ts
+  s_927e0e23985343::t_5b45e5b14d0ad7 1-63
+apps/server/src/server.ts
+  s_927e0e23985343::t_6d48d8bb880b89 176,701
+apps/server/src/ws.ts
+  s_927e0e23985343::t_11db2c14b23bd1 1976-1978
+packages/contracts/src/environmentHttp.ts
+  s_927e0e23985343::t_1739c121436972 57,127,603-618,661-669,793
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dcb65f35bffe9a144b75e5c51c70cb9c8a831405",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
