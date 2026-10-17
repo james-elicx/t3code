@@ -17,8 +17,8 @@ entrypoint applies policy and adds the real credential outside the sandbox.
 
 | Piece                     | Where                                                   | What it does                                                                                                                                                                                                             |
 | ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Sandbox API               | `src/worker.ts`                                         | `GET/POST /api/sandboxes`, `GET/DELETE /api/sandboxes/:id`, `POST …/:id/stop\|snapshot\|restore`                                                                                                                         |
-| One DO per sandbox        | `src/ThreadSandbox.ts`                                  | Owns the session record and the container. Boots the T3 server and issues it a bearer token. Proxies `/s/<thread-id>/…` HTTP and WebSocket with that token added                                                         |
+| Sandbox API               | `src/worker.ts`                                         | `GET/POST /api/sandboxes`, `GET/DELETE /api/sandboxes/:id`, `POST …/:id/wake\|sleep`                                                                                                                                     |
+| One DO per sandbox        | `src/ThreadSandbox.ts`                                  | Owns the session record and the container. Boots the T3 server, issues it a bearer token, creates its project. Proxies `/s/<thread-id>/…` with that token added. Sleeps and wakes it (below)                             |
 | Directory                 | `src/SandboxDirectory.ts`                               | Summaries pushed by each sandbox, so clients list idle sandboxes without waking them                                                                                                                                     |
 | Egress                    | `src/egress/Egress.ts`                                  | The only way out of a sandbox. Anthropic and GitHub get the handling below; any other host is fetched as asked, since the sandbox holds nothing to protect. Raw TCP is off                                               |
 | &nbsp;&nbsp;Anthropic     | `src/egress/anthropic.ts`                               | `api.anthropic.com/v1/*` is rewritten to `gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic/v1/*` with `cf-aig-authorization`. `x-api-key` is dropped. `ANTHROPIC_BASE_URL` is not set in the sandbox           |
@@ -58,7 +58,7 @@ Two test suites run against the running control plane:
 
 - `vp run e2e` creates a sandbox and proves each control-plane claim with shell-level evidence,
   including a `claude -p` turn through the gateway rewrite. It prints PASS/FAIL per claim and
-  destroys the sandbox. Set `KEEP=1` to keep it, or `SKIP_SNAPSHOT=1` to skip snapshot and restore.
+  destroys the sandbox. Set `KEEP=1` to keep it.
 - `vp run e2e:ui` drives the web client in headless Chromium: start a sandbox thread from the
   landing page and chat, start a second one with "New thread", reload, and delete one from the
   command palette. It checks the mock's records to confirm Claude's own request went through the
@@ -67,8 +67,33 @@ Two test suites run against the running control plane:
 
 Unit tests for the parser and policies: `vp run test`.
 
-`POST /api/sandboxes/:id/exec` runs a command in a sandbox. It exists only for these proofs and
-is gated on `DEBUG_EXEC=1`.
+`POST /api/sandboxes/:id/exec` runs a command in a sandbox, and `POST …/:id/forget-snapshot`
+makes the next wake ignore its snapshot. They exist only for these proofs and are gated on
+`DEBUG_EXEC=1`.
+
+## Sleeping and waking
+
+A sandbox keeps its disk until it is deleted, without running all the time:
+
+- **Awake while there is work.** An alarm checks the T3 server's thread list every minute. While a
+  thread is unsettled, has a live run or background tasks, or a client has called `/wake` in the
+  last 10 minutes, the sandbox stays up. Clients call `/wake` when they open the thread and every
+  minute while it stays open.
+- **Then asleep.** It backs up the T3 home (T3's database, settings, Claude's transcripts in
+  `CLAUDE_CONFIG_DIR=/t3home/claude`) to R2 with `DirectoryBackup`, snapshots the container's
+  disk (the checkout, uncommitted work, installed dependencies), and stops. While asleep, proxied
+  requests get `503 {"status":"asleep"}` and do not wake it: clients ping every environment they
+  know, so only `/wake` boots one.
+- **Waking.** The container starts from its snapshot and the T3 home is restored from R2 before T3
+  starts. Snapshots expire after 30 days and belong to one image. Without a usable one, the sandbox
+  starts from the image, restores the T3 home, clones the repo and checks out the session branch
+  it pushed. Uncommitted work is lost on that path; history and settings are not.
+- **Checkpoints.** An awake sandbox saves the same way every 30 minutes when its egress shows the
+  agent working, so a host restart loses at most that much. A sandbox whose container died while
+  awake is restarted from its last save.
+- **Deleting** the sandbox deletes its R2 objects. Its snapshot cannot be deleted and expires.
+
+Locally `SLEEP_AFTER_MS` is 20 seconds and the alarm runs every 5, so the proofs can watch it.
 
 ## The web client in sandbox mode
 
@@ -128,6 +153,10 @@ for them.
    ```
 
    Leave `GITHUB_READ_PAT` empty to go without one. `DEBUG_EXEC` is off.
+
+   The R2 bucket `t3-sandbox-control-backups` must exist in the Worker's account. Give it a
+   lifecycle rule that aborts incomplete multipart uploads after a day: a backup interrupted by a
+   restart leaves one behind.
 
 4. **Cloudflare Access.** In Zero Trust, add a self-hosted application for the hostname
    `t3-sandbox-control.<subdomain>.workers.dev`, with an Allow policy for the people who should

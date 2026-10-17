@@ -1,8 +1,12 @@
+import type { DirectoryBackupGatewayBinding } from "@cloudflare/sandbox";
+
 import type { SandboxDirectory } from "./SandboxDirectory.ts";
 import type { ThreadSandbox } from "./ThreadSandbox.ts";
 
 export interface Env {
   readonly ASSETS: Fetcher;
+  /** Each sandbox's T3 home, saved when it sleeps and at checkpoints. */
+  readonly BACKUPS: R2Bucket;
 
   /**
    * Cloudflare Access: `https://<team>.cloudflareaccess.com` and the
@@ -22,6 +26,10 @@ export interface Env {
   readonly GITHUB_API_ORIGIN: string;
   /** `"1"` enables `POST /api/sandboxes/:id/exec`, which local proofs use. Never in production. */
   readonly DEBUG_EXEC: string;
+  /** How long a settled sandbox stays awake after its last view, in ms. */
+  readonly SLEEP_AFTER_MS: string;
+  /** How often an awake sandbox's lifecycle alarm runs, in ms. */
+  readonly LIFECYCLE_TICK_MS: string;
 }
 
 export interface EgressProps {
@@ -36,6 +44,7 @@ export interface EgressProps {
 export interface ControlPlaneExports {
   readonly ThreadSandbox: DurableObjectNamespace<ThreadSandbox>;
   readonly SandboxDirectory: DurableObjectNamespace<SandboxDirectory>;
+  readonly DirectoryBackupGateway: DirectoryBackupGatewayBinding;
   Egress(options: { props: EgressProps }): Fetcher;
 }
 

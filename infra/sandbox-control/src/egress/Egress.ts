@@ -25,6 +25,13 @@ import { PktLineError, readReceivePackCommands, receivePackRejection } from "./p
 export class Egress extends WorkerEntrypoint<Env, EgressProps> {
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    // Egress is how the control plane knows the agent is working (see lifecycle.ts).
+    this.ctx.waitUntil(
+      controlPlane(this.ctx)
+        .ThreadSandbox.getByName(this.ctx.props.threadId)
+        .noteActivity()
+        .catch(() => {}),
+    );
     try {
       switch (url.hostname) {
         case "api.anthropic.com":

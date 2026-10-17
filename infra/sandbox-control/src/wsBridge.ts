@@ -1,9 +1,5 @@
-/**
- * Accepts both ends of a proxied WebSocket in the Durable Object. A socket that
- * only passed through would not count as activity; an accepted one keeps the
- * sandbox awake while a client is connected.
- */
-export function bridgeWebSocket(upstream: WebSocket, onMessage?: () => void): Response {
+/** Accepts both ends of a proxied WebSocket in the Durable Object and relays between them. */
+export function bridgeWebSocket(upstream: WebSocket): Response {
   const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
   upstream.binaryType = "arraybuffer";
   server.binaryType = "arraybuffer";
@@ -12,7 +8,6 @@ export function bridgeWebSocket(upstream: WebSocket, onMessage?: () => void): Re
   // A listener that throws drops the connection, so these never throw.
   const relay = (from: WebSocket, to: WebSocket) => {
     from.addEventListener("message", (event) => {
-      onMessage?.();
       try {
         to.send(event.data);
       } catch {

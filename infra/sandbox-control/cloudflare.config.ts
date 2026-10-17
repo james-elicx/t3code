@@ -32,6 +32,8 @@ function deployedVars() {
     GITHUB_ORIGIN: "https://github.com",
     GITHUB_API_ORIGIN: "https://api.github.com",
     DEBUG_EXEC: "0",
+    SLEEP_AFTER_MS: String(10 * 60 * 1000),
+    LIFECYCLE_TICK_MS: String(60 * 1000),
     // Until both are set, the Worker refuses every request: it serves loopback hosts only.
     ACCESS_TEAM_DOMAIN: process.env.SANDBOX_ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "") ?? "",
     ACCESS_AUD: process.env.SANDBOX_ACCESS_AUD?.trim() ?? "",
@@ -58,6 +60,9 @@ const localVars = {
   GITHUB_ORIGIN: `${MOCK}/github`,
   GITHUB_API_ORIGIN: `${MOCK}/github-api`,
   DEBUG_EXEC: "1",
+  // Short, so proofs can watch a settled sandbox fall asleep.
+  SLEEP_AFTER_MS: String(20 * 1000),
+  LIFECYCLE_TICK_MS: String(5 * 1000),
   ACCESS_TEAM_DOMAIN: "",
   ACCESS_AUD: "",
 };
@@ -93,6 +98,8 @@ export default defineConfig(({ mode }) => {
         AI_GATEWAY_TOKEN: bindings.secret(),
         GITHUB_WRITE_PAT: bindings.secret(),
         GITHUB_READ_PAT: bindings.secret(),
+        // Sandboxes' T3 homes while they sleep, until the sandbox is deleted.
+        BACKUPS: bindings.r2({ name: `${WORKER_NAME}-backups` }),
         // ThreadSandbox and SandboxDirectory are reached through ctx.exports, not
         // bindings (see ControlPlaneExports in src/env.ts).
         ASSETS: bindings.assets(),

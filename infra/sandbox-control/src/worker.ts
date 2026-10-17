@@ -5,6 +5,7 @@ import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
 import type { CreateSandboxInput, SandboxSummary } from "./ThreadSandbox.ts";
 
+export { DirectoryBackupGateway } from "@cloudflare/sandbox";
 export { Egress } from "./egress/Egress.ts";
 export { SandboxDirectory } from "./SandboxDirectory.ts";
 export { ThreadSandbox } from "./ThreadSandbox.ts";
@@ -78,6 +79,7 @@ async function api(
         repo: input.repo,
         ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
         ...(input.title ? { title: input.title } : {}),
+        ...(input.instance ? { instance: input.instance } : {}),
       });
       return Response.json(withRoutes(summary, url), { status: 202 });
     }
@@ -95,13 +97,15 @@ async function api(
     case "DELETE ":
       await sandbox.destroy();
       return new Response(null, { status: 204 });
-    case "POST stop":
-      await sandbox.stop();
-      return Response.json(withRoutes((await sandbox.describe())!, url));
-    case "POST snapshot":
-      return Response.json(await sandbox.snapshot());
-    case "POST restore":
-      return Response.json(withRoutes(await sandbox.restore(), url), { status: 202 });
+    // A client has the thread open; boots an asleep sandbox. Call it again every minute.
+    case "POST wake":
+      return Response.json(withRoutes(await sandbox.wake(), url), { status: 202 });
+    case "POST sleep":
+      return Response.json(withRoutes(await sandbox.sleep(), url));
+    case "POST forget-snapshot":
+      if (env.DEBUG_EXEC !== "1") return text(404, "Not found.");
+      await sandbox.forgetSnapshot();
+      return new Response(null, { status: 204 });
     case "POST exec": {
       if (env.DEBUG_EXEC !== "1") return text(404, "Not found.");
       const body = (await request.json()) as {

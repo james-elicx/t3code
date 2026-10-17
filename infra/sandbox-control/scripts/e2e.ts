@@ -63,6 +63,8 @@ const refs = async (): Promise<Record<string, string>> => (await fetch(`${mock}/
 const basic = (token: string) =>
   `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
 
+let viewing: ReturnType<typeof setInterval> | undefined;
+
 async function main() {
   for (const url of [`${control}/api/sandboxes`, `${mock}/__refs`]) {
     await fetch(url).catch(() => {
@@ -73,13 +75,24 @@ async function main() {
   // --- Create, list, proxy -------------------------------------------------
   const started = Date.now();
   await api("", { method: "POST", body: JSON.stringify({ threadId, repo: "acme/demo" }) });
-  let summary: { status: string; lastError: string | null; pullRequests: unknown[] };
+  let summary: {
+    status: string;
+    lastError: string | null;
+    pullRequests: unknown[];
+    savedAt: string | null;
+  };
   do {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     summary = await api(`/${threadId}`);
     if (summary.lastError) throw new Error(`boot failed: ${summary.lastError}`);
     if (Date.now() - started > 240_000) throw new Error("sandbox did not start in 240s");
   } while (summary.status !== "running");
+  // What a client does while the thread is open: without it, a sandbox with no
+  // work left sleeps after SLEEP_AFTER_MS.
+  viewing = setInterval(
+    () => void api(`/${threadId}/wake`, { method: "POST" }).catch(() => {}),
+    5000,
+  );
   check(
     "sandbox boots a T3 server",
     true,
@@ -153,6 +166,27 @@ async function main() {
     {
       viaProxy: pong,
       withoutCredential: wsDirect.stdout,
+    },
+  );
+
+  // --- The project ----------------------------------------------------------
+  const shell = (await (
+    await fetch(`${sandboxRoute}/api/orchestration/shell`, {
+      headers: { "x-t3-orchestration-protocol": "2" },
+    })
+  ).json()) as {
+    projects: Array<{ id: string; workspaceRoot: string; repositoryIdentity?: unknown }>;
+    threads: unknown[];
+  };
+  check(
+    "the control plane creates the checkout's project, and T3 makes no thread of its own",
+    shell.projects.length === 1 &&
+      shell.projects[0]!.id === "sandbox:acme/demo" &&
+      shell.projects[0]!.workspaceRoot === "/workspace/demo" &&
+      shell.threads.length === 0,
+    {
+      projects: shell.projects.map(({ id, workspaceRoot }) => ({ id, workspaceRoot })),
+      threads: shell.threads.length,
     },
   );
 
@@ -318,28 +352,100 @@ async function main() {
     egress.stdout,
   );
 
-  // --- Snapshot and restore ------------------------------------------------
-  if (process.env.SKIP_SNAPSHOT !== "1") {
-    const snapshot = await api(`/${threadId}/snapshot`, { method: "POST" });
-    await api(`/${threadId}/restore`, { method: "POST" });
-    const restoreStarted = Date.now();
+  // --- Sleep and wake ------------------------------------------------------
+  clearInterval(viewing);
+  const before = await sh(
+    `cd /workspace/demo && echo draft > uncommitted.txt && echo ${threadId} > /t3home/userdata/e2e-marker && ` +
+      "cat /t3home/userdata/environment-id",
+  );
+  const environmentBefore = before.stdout.trim();
+  const sleepStarted = Date.now();
+  const asleep = await api(`/${threadId}/sleep`, { method: "POST" });
+  const sleepSeconds = Math.round((Date.now() - sleepStarted) / 1000);
+  const whileAsleep = await fetch(`${sandboxRoute}/api/auth/session`);
+  const afterPoke = await api(`/${threadId}`);
+  check(
+    "sleep saves and stops; proxied traffic gets 503 and does not wake it",
+    asleep.status === "asleep" &&
+      asleep.savedAt !== null &&
+      whileAsleep.status === 503 &&
+      afterPoke.status === "asleep",
+    `saved and stopped in ${sleepSeconds}s; proxy answered ${whileAsleep.status} ` +
+      `${(await whileAsleep.text()).trim()}; status afterwards: ${afterPoke.status}`,
+  );
+
+  /** Wakes the sandbox as a client opening the thread does, and keeps viewing it. */
+  const wake = async () => {
+    const started = Date.now();
+    await api(`/${threadId}/wake`, { method: "POST" });
+    viewing = setInterval(
+      () => void api(`/${threadId}/wake`, { method: "POST" }).catch(() => {}),
+      5000,
+    );
+    const phases: string[] = [];
     do {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       summary = await api(`/${threadId}`);
-      if (Date.now() - restoreStarted > 240_000) throw new Error("restore did not finish in 240s");
+      if (phases.at(-1) !== summary.status) phases.push(summary.status);
+      if (summary.lastError) throw new Error(`wake failed: ${summary.lastError}`);
+      if (Date.now() - started > 240_000) throw new Error("wake did not finish in 240s");
     } while (summary.status !== "running");
-    const restored = await sh("cd /workspace/demo && git log -1 --format=%s");
+    const state = await sh(
+      "cd /workspace/demo; git rev-parse --abbrev-ref HEAD; git log -1 --format=%s; " +
+        "cat uncommitted.txt 2>/dev/null || echo '(no uncommitted.txt)'; " +
+        "cat /t3home/userdata/environment-id /t3home/userdata/e2e-marker",
+    );
     const session = (await (await fetch(`${sandboxRoute}/api/auth/session`)).json()) as {
       authenticated: boolean;
     };
-    check(
-      "snapshot and restore keep the workspace",
-      restored.stdout.trim() === `change from ${threadId}` && session.authenticated === true,
-      `snapshot ${snapshot.id} (${Math.round(snapshot.size / 1e6)} MB); ` +
-        `restored in ${Math.round((Date.now() - restoreStarted) / 1000)}s; ` +
-        `last commit "${restored.stdout.trim()}"; proxy authenticated: ${session.authenticated}`,
-    );
-  }
+    return {
+      seconds: Math.round((Date.now() - started) / 1000),
+      phases: phases.join(" → "),
+      state: state.stdout.trim() + state.stderr,
+      authenticated: session.authenticated,
+    };
+  };
+  const t3Home = [environmentBefore, threadId];
+  const woken = await wake();
+  check(
+    "wake restores the workspace from the snapshot and the T3 home from R2",
+    woken.state ===
+      [`${branchPrefix}work`, `change from ${threadId}`, "draft", ...t3Home].join("\n") &&
+      woken.authenticated,
+    `awake in ${woken.seconds}s via ${woken.phases}\n` +
+      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${woken.state}`,
+  );
+
+  // An expired snapshot: the image, the T3 home from R2, and the pushed session branch.
+  clearInterval(viewing);
+  await api(`/${threadId}/sleep`, { method: "POST" });
+  await api(`/${threadId}/forget-snapshot`, { method: "POST" });
+  const rebuilt = await wake();
+  check(
+    "without a snapshot, wake rebuilds from the image, R2 and the pushed session branch",
+    rebuilt.state ===
+      [`${branchPrefix}work`, `change from ${threadId}`, "(no uncommitted.txt)", ...t3Home].join(
+        "\n",
+      ) && rebuilt.authenticated,
+    `awake in ${rebuilt.seconds}s via ${rebuilt.phases}\n` +
+      `branch, last commit, uncommitted file, environment id, T3 home marker:\n${rebuilt.state}`,
+  );
+
+  clearInterval(viewing);
+  viewing = undefined;
+  // Nobody views it and it has no thread with work, so the lifecycle alarm puts it
+  // back to sleep (SLEEP_AFTER_MS is 20s locally).
+  const idleStarted = Date.now();
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    summary = await api(`/${threadId}`);
+    if (Date.now() - idleStarted > 120_000) break;
+  } while (summary.status !== "asleep");
+  check(
+    "an unviewed sandbox with no work left falls asleep on its own",
+    summary.status === "asleep",
+    `${summary.status} after ${Math.round((Date.now() - idleStarted) / 1000)}s unviewed`,
+  );
 }
 
 try {
@@ -348,6 +454,7 @@ try {
   failures++;
   console.log(`FAIL  ${String(error)}`);
 } finally {
+  clearInterval(viewing);
   if (process.env.KEEP !== "1") await api(`/${threadId}`, { method: "DELETE" }).catch(() => {});
 }
 console.log(failures === 0 ? "\nAll proofs passed." : `\n${failures} proof(s) failed.`);

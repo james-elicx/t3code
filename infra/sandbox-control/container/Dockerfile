@@ -20,12 +20,16 @@ RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.301 
 RUN npm install --global --no-audit --no-fund pnpm@11.1.1 vite-plus@1.1.0 \
   && node --version && pnpm --version && vp --version
 
+# Moves directory backups between the container and R2 for the control plane.
+# The tag matches @cloudflare/sandbox in package.json.
+COPY --from=docker.io/cloudflare/sandbox:1.0.1 /usr/local/bin/sandbox-shim /usr/local/bin/sandbox-shim
+
 # This branch's server bundle, staged by `vp run stage` (scripts/stage-t3.ts).
 COPY t3-dist/ dist/
 COPY sandbox-settings.json /opt/t3/sandbox-settings.json
 COPY entrypoint.sh /usr/local/bin/t3-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/t3-sandbox-entrypoint \
-  && mkdir -p /t3home /workspace \
+  && mkdir -p /workspace \
   && git config --system user.name "T3 Sandbox" \
   && git config --system user.email "sandbox@t3.invalid" \
   && git config --system init.defaultBranch main

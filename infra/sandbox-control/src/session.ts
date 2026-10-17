@@ -20,6 +20,13 @@ export interface RecordedPullRequest {
 
 export const sessionBranchPrefix = (threadId: string) => `t3/${threadId}/`;
 
+/**
+ * The checkout's project in every sandbox for a repo. The control plane creates
+ * it, so clients can find it, and project-scoped settings carry across sandboxes.
+ */
+export const sandboxProjectId = (repo: { readonly owner: string; readonly name: string }) =>
+  `sandbox:${repo.owner}/${repo.name}`.toLowerCase();
+
 /** DNS-label-shaped ids: one path segment, `/s/<id>`, and safe in branch names. */
 export const SANDBOX_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
