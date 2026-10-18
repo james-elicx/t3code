@@ -21,10 +21,10 @@ RUN npm install --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.301 
 RUN npm install --global --no-audit --no-fund pnpm@11.1.1 vite-plus@1.1.0 \
   && node --version && pnpm --version && vp --version
 
-# System libraries Playwright's Chromium, Firefox and WebKit need, so a repo's
-# browser tests can run. The browsers themselves come from the repo's own
+# System libraries Playwright's Chromium and WebKit need, the browsers
+# cloudflare/vinext tests in. The browsers themselves come from the repo's own
 # `playwright install`.
-RUN npx --yes playwright@1.64.1 install-deps \
+RUN npx --yes playwright@1.64.1 install-deps chromium webkit \
   && rm -rf /var/lib/apt/lists/* /root/.npm
 
 # Moves directory backups between the container and R2, and mounts the shared
