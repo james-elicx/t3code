@@ -1,0 +1,25 @@
+infra/sandbox-control/scripts/e2e.ts
+  s_927e0e23985343::t_3bccb1a9462227 361-369
+infra/sandbox-control/src/egress/Egress.ts
+  s_927e0e23985343::t_bd042a56ad93d3 5-9,58-59
+infra/sandbox-control/src/egress/anthropic.test.ts
+  s_927e0e23985343::t_1a459c8f262ce5 3-7,63-90
+infra/sandbox-control/src/egress/anthropic.ts
+  s_927e0e23985343::t_7f80d6d559fa63 24-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a64edb83e0e1db4386a10f4ca326369088b65ba8",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
