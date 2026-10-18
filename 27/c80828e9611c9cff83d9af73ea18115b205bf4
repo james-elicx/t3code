@@ -1,0 +1,19 @@
+apps/server/src/resourceTelemetry/ResourceMonitorBinary.ts
+  s_927e0e23985343::t_8450d3025af5e1 68-73,85-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "27c80828e9611c9cff83d9af73ea18115b205bf4",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
