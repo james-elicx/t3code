@@ -119,13 +119,19 @@ else
       mark branch
     fi
   fi
-  # Also when a snapshot caught the checkout before its history arrived.
-  if [ -f "$CHECKOUT/.git/shallow" ]; then
-    nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \
-      > /var/log/t3-sandbox-history.log 2>&1 &
-  fi
-  # Dependencies, in the background and below T3 in priority (see deps.sh).
-  nice -n 10 t3-sandbox-deps sandbox "$CHECKOUT" > /dev/null 2>&1 &
+  # History and dependencies arrive in the background, once T3 answers: on half
+  # a vCPU, their disk writes alone made T3 take a minute to start. Until then
+  # the status says installing, so pnpm, npx and vp wait (see deps.sh).
+  (
+    until curl -fs -o /dev/null http://127.0.0.1:3773/.well-known/t3/environment; do sleep 1; done
+    # Also when a snapshot caught the checkout before its history arrived.
+    if [ -f "$CHECKOUT/.git/shallow" ]; then
+      nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \
+        > /var/log/t3-sandbox-history.log 2>&1 &
+    fi
+    nice -n 10 t3-sandbox-deps sandbox "$CHECKOUT" > /dev/null 2>&1
+  ) &
+  printf 'installing %s\n' "$!" > /run/t3-sandbox-deps
 fi
 
 # A container that is booting runs no server; a restored home may still hold

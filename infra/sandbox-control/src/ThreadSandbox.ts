@@ -709,12 +709,12 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (record.asleep) throw new Error("The sandbox is asleep.");
     const startedHere = !this.container.running;
     const timing = bootTiming();
+    // A snapshot holds the checkout's node_modules; a checkout cloned fresh starts from the cache.
+    const snapshot = startedHere ? this.usableSnapshot(record) : null;
+    const restoresDeps = startedHere && !snapshot && !record.probe;
     if (startedHere) {
       this.t3Ready = false;
       this.projectBaseline = null;
-      const snapshot = this.usableSnapshot(record);
-      // A snapshot holds the checkout's node_modules; a checkout cloned fresh starts from the cache.
-      const restoresDeps = !snapshot && !record.probe;
       const preparedToken = randomId();
       if (!record.ranAt) await this.setStep(record, "container");
       await this.intercept(record);
@@ -756,8 +756,6 @@ export class ThreadSandbox extends DurableObject<Env> {
         await this.mountShared();
         timing.mark("shared mounted");
         await this.run(["sh", "-c", `printf %s "$0" > ${PREPARED_MARKER}`, preparedToken]);
-        // Alongside the clone and T3 starting; the install waits for it, the thread does not.
-        if (restoresDeps) this.ctx.waitUntil(this.restoreDeps(record));
         if (!record.ranAt) await this.setStep(record, "clone");
       } finally {
         this.phase = null;
@@ -774,6 +772,8 @@ export class ThreadSandbox extends DurableObject<Env> {
       await this.ctx.storage.put("t3Token", token);
       timing.mark("token");
     }
+    // Only now: its disk writes would slow T3's start. The install waits for it, the thread does not.
+    if (restoresDeps) this.ctx.waitUntil(this.restoreDeps(record));
     // Nobody can have edited settings yet: clients connect only once this boot is done.
     if (startedHere || !(await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY))) {
       const settings = await this.readSettings();
