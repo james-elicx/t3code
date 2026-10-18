@@ -40,6 +40,22 @@ const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
  * restores the T3 home and mounts the shared bucket.
  */
 const PREPARED_MARKER = "/run/t3-sandbox-prepared";
+/** Where the entrypoint marks when each of its steps finished. */
+const TIMING_PATH = "/run/t3-sandbox-timing";
+
+/** Each boot step's duration in ms, for the boot log. */
+function bootTiming() {
+  let last = Date.now();
+  const steps: Record<string, number> = {};
+  return {
+    mark(step: string) {
+      const now = Date.now();
+      steps[step] = now - last;
+      last = now;
+    },
+    steps: () => steps,
+  };
+}
 /** A backstop only: the alarm loop polls the T3 server every tick, which keeps it busy. */
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 const READY_TIMEOUT_MS = 180_000;
@@ -649,6 +665,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     const record = await this.requireRecord();
     if (record.asleep) throw new Error("The sandbox is asleep.");
     const startedHere = !this.container.running;
+    const timing = bootTiming();
     if (startedHere) {
       this.t3Ready = false;
       this.projectBaseline = null;
@@ -685,8 +702,13 @@ export class ThreadSandbox extends DurableObject<Env> {
           }
           throw error;
         });
-        if (record.backup) await this.restoreHome(record, record.backup);
+        timing.mark("executable");
+        if (record.backup) {
+          await this.restoreHome(record, record.backup);
+          timing.mark("restored");
+        }
         await this.mountShared();
+        timing.mark("shared mounted");
         await this.run(["sh", "-c", `printf %s "$0" > ${PREPARED_MARKER}`, preparedToken]);
         if (!record.ranAt) await this.setStep(record, "clone");
       } finally {
@@ -697,10 +719,12 @@ export class ThreadSandbox extends DurableObject<Env> {
     }
 
     const descriptor = await this.waitForT3();
+    timing.mark("t3 answered");
     let token = await this.ctx.storage.get<string>("t3Token");
     if (startedHere || !token) {
       token = await this.issueToken();
       await this.ctx.storage.put("t3Token", token);
+      timing.mark("token");
     }
     // Nobody can have edited settings yet: clients connect only once this boot is done.
     if (startedHere || !(await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY))) {
@@ -710,15 +734,41 @@ export class ThreadSandbox extends DurableObject<Env> {
     if (!record.ranAt) await this.setStep(record, "launch");
     if (!record.probe) {
       this.projectBaseline = await this.ensureProject(record, token);
+      timing.mark("project");
       await this.launchPending(record, token);
+      timing.mark("thread launched");
     }
     this.step = null;
     record.environmentId = descriptor.environmentId;
     record.ranAt ??= new Date().toISOString();
     this.t3Ready = true;
     await this.save(record);
+    if (startedHere) {
+      console.log(
+        "sandbox boot",
+        JSON.stringify({
+          threadId: record.threadId,
+          controlPlane: timing.steps(),
+          container: await this.containerTiming(),
+        }),
+      );
+    }
     if (startedHere && (await this.onSettingsTemplate())) await this.captureServerConfig(token);
     return token;
+  }
+
+  /** The entrypoint's steps, in ms each, from the marks it leaves in the container. */
+  private async containerTiming(): Promise<Record<string, number> | null> {
+    const output = await (await this.container.exec(["cat", TIMING_PATH])).output();
+    if (output.exitCode !== 0) return null;
+    const marks = new TextDecoder()
+      .decode(output.stdout)
+      .trim()
+      .split("\n")
+      .map((line) => line.split(" ") as [string, string]);
+    return Object.fromEntries(
+      marks.slice(1).map(([label, at], index) => [label, Number(at) - Number(marks[index]![1])]),
+    );
   }
 
   /**

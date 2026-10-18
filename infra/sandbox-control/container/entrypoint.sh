@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+# When each step finished (ms since the epoch), for the control plane's boot log.
+mark() { printf '%s %s\n' "$1" "$(date +%s%3N)" >> /run/t3-sandbox-timing; }
+: > /run/t3-sandbox-timing
+mark start
+
 # HTTPS interception re-signs traffic with a per-instance CA. Add it to the
 # system store so git, curl and the Claude CLI trust it; Node also reads
 # NODE_EXTRA_CA_CERTS, which the control plane sets.
@@ -9,6 +14,7 @@ if [ -f "$CA" ]; then
   cp "$CA" /usr/local/share/ca-certificates/cloudflare-containers-ca.crt
   update-ca-certificates >/dev/null 2>&1 || echo "warning: could not update CA store" >&2
 fi
+mark ca
 
 # The control plane restores the T3 home of a waking sandbox and mounts the
 # shared bucket, then writes this boot's token to the marker.
@@ -23,6 +29,7 @@ if [ -n "${T3_SANDBOX_PREPARED:-}" ]; then
     waited=$((waited + 1))
   done
 fi
+mark prepared
 
 # Every step below is skipped when a restore or snapshot already did it.
 T3_HOME="${T3CODE_HOME:-/t3home}"
@@ -70,12 +77,14 @@ else
       echo "error: could not clone $T3_SANDBOX_REPO" >&2
       exit 1
     fi
+    mark clone
     if [ -n "${T3_SANDBOX_BRANCH:-}" ]; then
       if git -C "$CHECKOUT" rev-parse --quiet --verify "refs/remotes/origin/$T3_SANDBOX_BRANCH" >/dev/null; then
         git -C "$CHECKOUT" checkout --quiet "$T3_SANDBOX_BRANCH"
       else
         git -C "$CHECKOUT" checkout --quiet -b "$T3_SANDBOX_BRANCH"
       fi
+      mark branch
     fi
   fi
 fi
@@ -88,6 +97,7 @@ rm -f "$T3_HOME/userdata/server-runtime.json"
 # from the repo), so T3 does not bootstrap one with an empty thread.
 cd "$CHECKOUT"
 export T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=false
+mark t3
 exec node /opt/t3/dist/bin.mjs start \
   --host 0.0.0.0 \
   --port 3773 \
