@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { aiGatewayBaseUrl, toAiGatewayRequest } from "./anthropic.ts";
+import {
+  aiGatewayBaseUrl,
+  anthropicOrganizationResponse,
+  toAiGatewayRequest,
+} from "./anthropic.ts";
 
 const config = {
   baseUrl: "https://gateway.ai.cloudflare.com/v1/account-id/t3-sandboxes/",
@@ -54,5 +58,33 @@ describe("aiGatewayBaseUrl", () => {
     expect(aiGatewayBaseUrl("")).toBeNull();
     expect(aiGatewayBaseUrl("https://gateway.ai.cloudflare.com/v1/account-id")).toBeNull();
     expect(aiGatewayBaseUrl("gateway.ai.cloudflare.com/v1/a/g")).toBeNull();
+  });
+});
+
+describe("anthropicOrganizationResponse", () => {
+  it("answers Claude Code's organization lookups with nothing configured", async () => {
+    const settings = anthropicOrganizationResponse(
+      new Request("https://api.anthropic.com/api/claude_code/settings"),
+    );
+    expect(settings?.status).toBe(204);
+    const limits = anthropicOrganizationResponse(
+      new Request("https://api.anthropic.com/api/claude_code/policy_limits"),
+    );
+    expect(limits?.status).toBe(200);
+    expect(await limits?.json()).toEqual({ restrictions: {} });
+  });
+
+  it("leaves every other request to the gateway rewrite or the refusal", () => {
+    for (const url of [
+      "https://api.anthropic.com/v1/messages",
+      "https://api.anthropic.com/api/oauth/token",
+    ]) {
+      expect(anthropicOrganizationResponse(new Request(url))).toBeNull();
+    }
+    expect(
+      anthropicOrganizationResponse(
+        new Request("https://api.anthropic.com/api/claude_code/settings", { method: "POST" }),
+      ),
+    ).toBeNull();
   });
 });

@@ -2,7 +2,11 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { controlPlane, type EgressProps, type Env } from "../env.ts";
 import { sharedGateway } from "../sharedMount.ts";
-import { aiGatewayBaseUrl, toAiGatewayRequest } from "./anthropic.ts";
+import {
+  aiGatewayBaseUrl,
+  anthropicOrganizationResponse,
+  toAiGatewayRequest,
+} from "./anthropic.ts";
 import { decideGraphql } from "./githubGraphql.ts";
 import {
   checkCreatePullRequest,
@@ -51,6 +55,8 @@ export class Egress extends WorkerEntrypoint<Env, EgressProps> {
   }
 
   private async anthropic(request: Request) {
+    const answered = anthropicOrganizationResponse(request);
+    if (answered) return answered;
     const baseUrl = aiGatewayBaseUrl(this.env.AI_GATEWAY_URL);
     if (!baseUrl) {
       console.error("AI_GATEWAY_URL is not an AI Gateway endpoint");

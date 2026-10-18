@@ -358,6 +358,15 @@ async function main() {
     checkout.stdout + checkout.stderr,
   );
 
+  const organization = await sh(
+    `for path in settings policy_limits; do curl -s -w " %{http_code}\\n" https://api.anthropic.com/api/claude_code/$path; done`,
+  );
+  check(
+    "Claude Code's organization lookups are answered with nothing configured, never sent on",
+    organization.stdout === ' 204\n{"restrictions":{}} 200\n',
+    organization.stdout + organization.stderr,
+  );
+
   await fetch(`${mock}/__recorded`, { method: "DELETE" });
   const cli = await sh(`cd /workspace/demo && claude -p "Say hello." 2>&1`);
   const cliCall = (await recorded()).find((request) =>

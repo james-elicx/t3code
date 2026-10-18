@@ -21,6 +21,23 @@ export function aiGatewayBaseUrl(endpoint: string | undefined): string | null {
   return /^(https?:\/\/[^\s]+?\/v1\/[^/\s]+\/[^/\s]+)/.exec(endpoint?.trim() ?? "")?.[1] ?? null;
 }
 
+/**
+ * What the egress answers itself for Claude Code's organization lookups, which
+ * a sandbox has no organization for: no managed settings (Claude Code reads a
+ * 204 as "none configured") and no policy restrictions. Refusing them instead
+ * reads as a policy it could not verify, and Claude Code retries each start.
+ */
+export function anthropicOrganizationResponse(request: Request): Response | null {
+  if (request.method !== "GET") return null;
+  switch (new URL(request.url).pathname) {
+    case "/api/claude_code/settings":
+      return new Response(null, { status: 204 });
+    case "/api/claude_code/policy_limits":
+      return Response.json({ restrictions: {} });
+  }
+  return null;
+}
+
 /** Credentials the sandbox might send; each is a stand-in and must not travel on. */
 const SANDBOX_CREDENTIAL_HEADERS = ["x-api-key", "authorization", "cookie"];
 
