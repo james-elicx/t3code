@@ -1,0 +1,25 @@
+infra/sandbox-control/container/Dockerfile
+  s_927e0e23985343::t_514c7079cc0c72 47-49
+infra/sandbox-control/container/entrypoint.sh
+  s_927e0e23985343::t_5fa8d7dc3a80c7 122-125,127-132
+infra/sandbox-control/scripts/e2e.ts
+  s_927e0e23985343::t_0193a4f98c63ee 261-262,266,268,272,274
+infra/sandbox-control/src/ThreadSandbox.ts
+  s_927e0e23985343::t_c4205c19e8a252 52-53,727,787-794
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "310bc6e1c84ac32faa277d664561f46bc23631f7",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
