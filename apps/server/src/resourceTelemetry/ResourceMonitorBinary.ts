@@ -65,6 +65,12 @@ function binaryName(platform: NodeJS.Platform): string {
 export type ResourceMonitorLinuxLibc = "gnu" | "musl";
 
 function detectResourceMonitorLinuxLibc(): ResourceMonitorLinuxLibc {
+  // The report's network section reverse-resolves every open socket, which
+  // stalls startup for tens of seconds where DNS does not answer (Node 20.13+;
+  // @types/node does not declare it yet).
+  const options = process.report as { excludeNetwork?: boolean } | undefined;
+  const excludeNetwork = options?.excludeNetwork;
+  if (options) options.excludeNetwork = true;
   try {
     const report = process.report?.getReport() as
       | {
@@ -76,6 +82,8 @@ function detectResourceMonitorLinuxLibc(): ResourceMonitorLinuxLibc {
     return typeof report?.header?.glibcVersionRuntime === "string" ? "gnu" : "musl";
   } catch {
     return "musl";
+  } finally {
+    if (options && excludeNetwork !== undefined) options.excludeNetwork = excludeNetwork;
   }
 }
 
