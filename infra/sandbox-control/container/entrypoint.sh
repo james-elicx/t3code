@@ -7,12 +7,17 @@ mark() { printf '%s %s\n' "$1" "$(date +%s%3N)" >> /run/t3-sandbox-timing; }
 mark start
 
 # HTTPS interception re-signs traffic with a per-instance CA. Add it to the
-# system store so git, curl and the Claude CLI trust it; Node also reads
-# NODE_EXTRA_CA_CERTS, which the control plane sets.
+# system bundle so git, curl and the Claude CLI trust it; Node also reads
+# NODE_EXTRA_CA_CERTS, which the control plane sets. The bundle is the image's
+# plus this instance's CA, rather than update-ca-certificates rebuilding the
+# whole store (16 s on half a vCPU). The CA is also left where a later rebuild
+# of the store, say by an apt install, picks it up.
 CA=/etc/cloudflare/certs/cloudflare-containers-ca.crt
+BUNDLE=/etc/ssl/certs/ca-certificates.crt
 if [ -f "$CA" ]; then
   cp "$CA" /usr/local/share/ca-certificates/cloudflare-containers-ca.crt
-  update-ca-certificates >/dev/null 2>&1 || echo "warning: could not update CA store" >&2
+  [ -f "$BUNDLE.image" ] || cp "$BUNDLE" "$BUNDLE.image"
+  cat "$BUNDLE.image" "$CA" > "$BUNDLE"
 fi
 mark ca
 
@@ -64,8 +69,10 @@ fi
 
 # The session repo, cloned through the egress broker. Work happens on the
 # sandbox's own branch, the only one it may push; a sandbox whose snapshot is
-# gone picks up from what it pushed there. A probe (booted only to read T3's
-# server config) has no repository.
+# gone picks up from what it pushed there. The clone is shallow: indexing the
+# full history of a large repo is most of a minute on half a vCPU, so history
+# and the other branches arrive in the background, below T3 in priority. A
+# probe (booted only to read T3's server config) has no repository.
 if [ -n "${T3_SANDBOX_PROBE:-}" ]; then
   CHECKOUT=/workspace/probe
   mkdir -p "$CHECKOUT"
@@ -73,19 +80,27 @@ else
   : "${T3_SANDBOX_REPO:?T3_SANDBOX_REPO is required (owner/name)}"
   CHECKOUT="/workspace/${T3_SANDBOX_REPO#*/}"
   if [ ! -d "$CHECKOUT/.git" ]; then
-    if ! git clone --quiet "https://github.com/$T3_SANDBOX_REPO.git" "$CHECKOUT"; then
+    if ! git clone --quiet --depth 1 "https://github.com/$T3_SANDBOX_REPO.git" "$CHECKOUT"; then
       echo "error: could not clone $T3_SANDBOX_REPO" >&2
       exit 1
     fi
     mark clone
+    # A shallow clone tracks only the default branch; track them all, as a full one does.
+    git -C "$CHECKOUT" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
     if [ -n "${T3_SANDBOX_BRANCH:-}" ]; then
-      if git -C "$CHECKOUT" rev-parse --quiet --verify "refs/remotes/origin/$T3_SANDBOX_BRANCH" >/dev/null; then
+      if git -C "$CHECKOUT" fetch --quiet --depth 1 origin \
+        "refs/heads/$T3_SANDBOX_BRANCH:refs/remotes/origin/$T3_SANDBOX_BRANCH" 2>/dev/null; then
         git -C "$CHECKOUT" checkout --quiet "$T3_SANDBOX_BRANCH"
       else
         git -C "$CHECKOUT" checkout --quiet -b "$T3_SANDBOX_BRANCH"
       fi
       mark branch
     fi
+  fi
+  # Also when a snapshot caught the checkout before its history arrived.
+  if [ -f "$CHECKOUT/.git/shallow" ]; then
+    nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \
+      > /var/log/t3-sandbox-history.log 2>&1 &
   fi
 fi
 
