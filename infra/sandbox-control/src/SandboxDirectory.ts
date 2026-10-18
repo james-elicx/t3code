@@ -33,6 +33,8 @@ export class SandboxDirectory extends DurableObject<Env> {
   private slots: Promise<unknown> = Promise.resolve();
   /** Each project's dependency check in flight, so two never start two builds. */
   private depsChecks = new Map<string, Promise<void>>();
+  /** Whether projects were checked since this object started, as after every deploy. */
+  private depsCheckedSinceStart = false;
 
   async upsert(summary: SandboxSummary): Promise<void> {
     await this.ctx.storage.put(`sandbox:${summary.threadId}`, summary);
@@ -159,8 +161,17 @@ export class SandboxDirectory extends DurableObject<Env> {
 
   /** Gives every project an unstarted sandbox again, as when one was deleted by hand. */
   async ensureSlots(): Promise<void> {
-    for (const project of await this.projects()) await this.ensureSlot(project.repo);
+    const projects = await this.projects();
+    for (const project of projects) await this.ensureSlot(project.repo);
     await this.scheduleDepsChecks();
+    // A deploy may bring a new image, or caches to existing projects: check them now
+    // rather than at the next periodic check.
+    if (!this.depsCheckedSinceStart) {
+      this.depsCheckedSinceStart = true;
+      for (const project of projects) {
+        this.ctx.waitUntil(this.checkDeps(project.repo).catch(warnDepsCheck));
+      }
+    }
   }
 
   /** The cache a new sandbox for the project restores, if there is one. */

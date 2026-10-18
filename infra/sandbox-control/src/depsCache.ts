@@ -52,6 +52,8 @@ export interface DepsState {
 /** What clients see of a project's cache. */
 export interface DepsSummary {
   readonly status: "none" | "building" | "ready" | "failed";
+  /** When the running build started. */
+  readonly buildStartedAt: string | null;
   readonly commit: string | null;
   readonly builtAt: string | null;
   readonly error: string | null;
@@ -100,6 +102,7 @@ export function depsSummary(state: DepsState): DepsSummary {
         : "none";
   return {
     status,
+    buildStartedAt: state.building?.startedAt ?? null,
     commit: state.cache?.commit ?? null,
     builtAt: state.cache?.builtAt ?? null,
     error: state.failed?.error ?? null,

@@ -128,8 +128,8 @@ behind the lockfile (98 packages added, 81 downloaded).
   no T3 server and no agent.
 - **Keeping it fresh.** Every `DEPS_CHECK_MS` (10 minutes; 10 seconds locally) the directory reads
   each default branch's HEAD over git's smart HTTP and, when it moved, its `pnpm-lock.yaml` from
-  `raw.githubusercontent.com`. A changed lockfile gets a new build. So does adding a project, and
-  a sandbox on an image whose Node, pnpm or architecture the cache wasn't built with
+  `raw.githubusercontent.com`. It also checks straight away when the directory starts, as after a
+  deploy. A changed lockfile gets a new build. So does adding a project, and a sandbox on an image whose Node, pnpm or architecture the cache wasn't built with
   (`/opt/t3/toolchain`). A failed build isn't retried for that lockfile for 6 hours.
 - **Who writes it.** Only the control plane, from a builder's output. Whatever is in a cache runs
   in every sandbox after it, so no sandbox an agent has worked in may make one. A sandbox only gets
