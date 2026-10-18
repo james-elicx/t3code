@@ -119,11 +119,17 @@ else
       mark branch
     fi
   fi
-  # History and dependencies arrive in the background, once T3 answers: on half
-  # a vCPU, their disk writes alone made T3 take a minute to start. Until then
-  # the status says installing, so pnpm, npx and vp wait (see deps.sh).
+  # History and dependencies arrive in the background, once the control plane
+  # has heard from T3: their disk writes would slow its start. Until then the
+  # status says installing, so pnpm, npx and vp wait (see deps.sh). (Polling T3
+  # from here never succeeded once deployed.)
   (
-    until curl -fs -o /dev/null http://127.0.0.1:3773/.well-known/t3/environment; do sleep 1; done
+    waited=0
+    until [ "$(cat /run/t3-sandbox-answered 2>/dev/null)" = "${T3_SANDBOX_PREPARED:-}" ] ||
+      [ "$waited" -ge 300 ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
     # Also when a snapshot caught the checkout before its history arrived.
     if [ -f "$CHECKOUT/.git/shallow" ]; then
       nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \

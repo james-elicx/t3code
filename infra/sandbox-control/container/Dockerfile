@@ -44,6 +44,9 @@ COPY deps.sh /usr/local/bin/t3-sandbox-deps
 COPY wait-for-deps.sh /opt/t3/bin/wait-for-deps
 RUN chmod +x /usr/local/bin/t3-sandbox-deps /opt/t3/bin/wait-for-deps \
   && for name in pnpm npx vp; do ln -s wait-for-deps "/opt/t3/bin/$name"; done \
+  && printf '%s\n' '# Login shells reset PATH; T3 and the agent use theirs.' \
+    'case ":$PATH:" in *:/opt/t3/bin:*) ;; *) PATH="/opt/t3/bin:$PATH" ;; esac' \
+    > /etc/profile.d/t3-sandbox-path.sh \
   && printf 'node %s pnpm %s %s\n' "$(node --version)" "$(pnpm --version)" "$(uname -m)" \
     > /opt/t3/toolchain
 RUN chmod +x /usr/local/bin/t3-sandbox-entrypoint \

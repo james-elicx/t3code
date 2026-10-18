@@ -49,6 +49,8 @@ const CA_PATH = "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
  * restores the T3 home and mounts the shared bucket.
  */
 const PREPARED_MARKER = "/run/t3-sandbox-prepared";
+/** The control plane writes the same token here once T3 answers; the entrypoint's background work waits for it. */
+const ANSWERED_MARKER = "/run/t3-sandbox-answered";
 /** Where the entrypoint marks when each of its steps finished. */
 const TIMING_PATH = "/run/t3-sandbox-timing";
 
@@ -722,10 +724,10 @@ export class ThreadSandbox extends DurableObject<Env> {
     // A snapshot holds the checkout's node_modules; a checkout cloned fresh starts from the cache.
     const snapshot = startedHere ? this.usableSnapshot(record) : null;
     const restoresDeps = startedHere && !snapshot && !record.probe;
+    const preparedToken = randomId();
     if (startedHere) {
       this.t3Ready = false;
       this.projectBaseline = null;
-      const preparedToken = randomId();
       if (!record.ranAt) await this.setStep(record, "container");
       await this.intercept(record);
       this.container.start({
@@ -782,7 +784,14 @@ export class ThreadSandbox extends DurableObject<Env> {
       await this.ctx.storage.put("t3Token", token);
       timing.mark("token");
     }
-    // Only now: its disk writes would slow T3's start. The install waits for it, the thread does not.
+    // Only now: their disk writes would slow T3's start. The thread waits for neither.
+    if (startedHere) {
+      this.ctx.waitUntil(
+        this.run(["sh", "-c", `printf %s "$0" > ${ANSWERED_MARKER}`, preparedToken]).catch(
+          (error: unknown) => console.warn("the background work was not started", String(error)),
+        ),
+      );
+    }
     if (restoresDeps) this.ctx.waitUntil(this.restoreDeps(record));
     // Nobody can have edited settings yet: clients connect only once this boot is done.
     if (startedHere || !(await this.ctx.storage.get<string>(SETTINGS_BASELINE_KEY))) {

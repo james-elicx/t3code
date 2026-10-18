@@ -258,19 +258,20 @@ async function main() {
     started=$(date +%s); version=$(cd /workspace/demo && pnpm --version 2>/tmp/waited)
     echo "pnpm $version after $(( $(date +%s) - started ))s: $(cat /tmp/waited)"
     printf 'done 1\\n' > /run/t3-sandbox-deps
-    tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^PATH=//p'
+    # T3 puts the login shell's PATH first, and the agent's shell is one.
+    bash -lc 'echo "$PATH"' 2>/dev/null
     C=$(tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^CLAUDE_CONFIG_DIR=//p')
     grep -c /run/t3-sandbox-deps "$C/CLAUDE.md"
   `);
-  const [waitLine, t3Path, noted] = waits.stdout.trim().split("\n");
+  const [waitLine, loginPath, noted] = waits.stdout.trim().split("\n");
   check(
-    "pnpm waits for the background install, on T3's PATH, and Claude is told",
+    "pnpm waits for the background install, on a login shell's PATH, and Claude is told",
     /^pnpm 11\.1\.1 after [3-9]s: Waiting for the sandbox to finish installing/.test(
       waitLine ?? "",
     ) &&
-      (t3Path ?? "").startsWith("/opt/t3/bin:") &&
+      (loginPath ?? "").startsWith("/opt/t3/bin:") &&
       noted === "1",
-    `${waitLine}\nT3's PATH: ${t3Path}\nCLAUDE.md mentions the install: ${noted}${waits.stderr}`,
+    `${waitLine}\nlogin PATH: ${loginPath}\nCLAUDE.md mentions the install: ${noted}${waits.stderr}`,
   );
 
   // --- Shared skills and memories -------------------------------------------
