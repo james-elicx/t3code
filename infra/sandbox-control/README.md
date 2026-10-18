@@ -19,7 +19,7 @@ entrypoint applies policy and adds the real credential outside the sandbox.
 | ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Sandbox API               | `src/worker.ts`                                         | `GET/POST /api/sandboxes`, `GET/DELETE /api/sandboxes/:id`, `POST …/:id/wake\|sleep`                                                                                                                                     |
 | One DO per sandbox        | `src/ThreadSandbox.ts`                                  | Owns the session record and the container. Boots the T3 server, issues it a bearer token, creates its project. Proxies `/s/<thread-id>/…` with that token added. Sleeps and wakes it (below)                             |
-| Directory                 | `src/SandboxDirectory.ts`                               | Summaries pushed by each sandbox, so clients list idle sandboxes without waking them                                                                                                                                     |
+| Directory                 | `src/SandboxDirectory.ts`                               | Summaries pushed by each sandbox, so clients list idle sandboxes without waking them. Projects, the settings template, and each project's dependency cache (below)                                                       |
 | Egress                    | `src/egress/Egress.ts`                                  | The only way out of a sandbox. Anthropic and GitHub get the handling below; any other host is fetched as asked, since the sandbox holds nothing to protect. Raw TCP is off                                               |
 | &nbsp;&nbsp;Anthropic     | `src/egress/anthropic.ts`                               | `api.anthropic.com/v1/*` is rewritten to `gateway.ai.cloudflare.com/v1/<account>/<gateway>/anthropic/v1/*` with `cf-aig-authorization`. `x-api-key` is dropped. `ANTHROPIC_BASE_URL` is not set in the sandbox           |
 | &nbsp;&nbsp;GitHub        | `src/egress/githubPolicy.ts`, `githubGraphql.ts`        | Read PAT for fetches and reads; write PAT only for allowed writes. Rules below                                                                                                                                           |
@@ -107,6 +107,36 @@ Before any edit, new sandboxes use `container/sandbox-settings.json`. Secrets ar
 T3 keeps them under `secrets/`.
 
 Locally `SLEEP_AFTER_MS` is 90 seconds (above the minute between an open thread's views) and the alarm runs every 5, so the proofs can watch it.
+
+## Dependencies
+
+A sandbox installs its checkout's dependencies in the background (`container/deps.sh`), below T3
+in priority, so its thread starts before they finish. `pnpm`, `npx` and `vp` in the image wait for
+that install before running, and Claude's `CLAUDE.md` says so. The state is in
+`/run/t3-sandbox-deps` and the log in `/var/log/t3-sandbox-deps.log`. Only pnpm workspaces are
+installed.
+
+Each project keeps a **dependency cache** in R2 (`src/depsCache.ts`): every `node_modules` of an
+install of its default branch. A new sandbox restores it while it clones, and its install then
+only adds and removes what its own lockfile changed since. Even then pnpm runs the repo's own
+install scripts again, as they write outside `node_modules`. Measured on cloudflare/vinext at half
+a CPU: 85 s for a full install, about 32 s onto a restored cache, and 34 s onto a cache four days
+behind the lockfile (98 packages added, 81 downloaded).
+
+- **Building.** A builder sandbox (`ThreadSandbox` with `depsBuild`, never listed) clones the
+  default branch, installs, and the control plane saves the result with `DirectoryBackup`. It runs
+  no T3 server and no agent.
+- **Keeping it fresh.** Every `DEPS_CHECK_MS` (10 minutes; 10 seconds locally) the directory reads
+  each default branch's HEAD over git's smart HTTP and, when it moved, its `pnpm-lock.yaml` from
+  `raw.githubusercontent.com`. A changed lockfile gets a new build. So does adding a project, and
+  a sandbox on an image whose Node, pnpm or architecture the cache wasn't built with
+  (`/opt/t3/toolchain`). A failed build isn't retried for that lockfile for 6 hours.
+- **Who writes it.** Only the control plane, from a builder's output. Whatever is in a cache runs
+  in every sandbox after it, so no sandbox an agent has worked in may make one. A sandbox only gets
+  a read grant for its project's cache, for the length of the restore.
+- **Keeping two.** A new cache replaces the last but one; the last stays for sandboxes still
+  restoring it. Removing the project deletes them. `GET /api/sandboxes/projects/<owner>/<name>`
+  reports the cache's state.
 
 ## Shared skills and memories
 

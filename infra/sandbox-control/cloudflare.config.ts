@@ -25,9 +25,11 @@ const MOCK = "http://127.0.0.1:8790";
 const deployedVars = {
   GITHUB_ORIGIN: "https://github.com",
   GITHUB_API_ORIGIN: "https://api.github.com",
+  GITHUB_RAW_ORIGIN: "https://raw.githubusercontent.com",
   DEBUG_EXEC: "0",
   SLEEP_AFTER_MS: String(10 * 60 * 1000),
   LIFECYCLE_TICK_MS: String(60 * 1000),
+  DEPS_CHECK_MS: String(10 * 60 * 1000),
   SHARED_S3_REGION: "auto",
   SHARED_BUCKET: `${WORKER_NAME}-shared`,
 };
@@ -35,11 +37,14 @@ const deployedVars = {
 const localVars = {
   GITHUB_ORIGIN: `${MOCK}/github`,
   GITHUB_API_ORIGIN: `${MOCK}/github-api`,
+  GITHUB_RAW_ORIGIN: `${MOCK}/github-raw`,
   DEBUG_EXEC: "1",
   // Short, so proofs can watch a settled sandbox fall asleep, but longer than
   // the minute between an open thread's views, so a viewed one stays up.
   SLEEP_AFTER_MS: String(90 * 1000),
   LIFECYCLE_TICK_MS: String(5 * 1000),
+  // Short, so proofs can watch a lockfile change on the default branch rebuild the cache.
+  DEPS_CHECK_MS: String(10 * 1000),
   SHARED_S3_REGION: "auto",
   SHARED_BUCKET: `${WORKER_NAME}-shared`,
 };
@@ -88,7 +93,8 @@ export default defineConfig(({ mode }) => {
         SHARED_S3_ENDPOINT: bindings.secret(),
         SHARED_S3_ACCESS_KEY_ID: bindings.secret(),
         SHARED_S3_SECRET_ACCESS_KEY: bindings.secret(),
-        // Sandboxes' T3 homes while they sleep, until the sandbox is deleted.
+        // Sandboxes' T3 homes while they sleep, until the sandbox is deleted, and
+        // each project's dependency cache.
         BACKUPS: bindings.r2({ name: `${WORKER_NAME}-backups` }),
         // ThreadSandbox and SandboxDirectory are reached through ctx.exports, not
         // bindings (see ControlPlaneExports in src/env.ts).

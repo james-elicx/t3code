@@ -8,10 +8,15 @@
  *   /github-api/...  api.github.com: a repository exists when it is served below;
  *                    creating a pull request returns #7.
  *   /github/...      github.com git smart HTTP, served by `git http-backend`
- *                    over a seeded bare repository `acme/demo`.
+ *                    over a seeded bare repository `acme/demo`, a tiny pnpm
+ *                    workspace whose install needs no registry.
+ *   /github-raw/...  raw.githubusercontent.com over the same repositories.
  *
  * Every request is recorded with its headers. `GET /__recorded` returns them,
  * `DELETE /__recorded` clears them, and `GET /__refs` lists the bare repo's refs.
+ * `POST /__main` commits to acme/demo's main as someone else would: a README
+ * change, or with `{"lockfile":true}` adding or removing the root's dependency
+ * on the `demo-extra` workspace package, which changes pnpm-lock.yaml.
  *
  * A second port (MOCK_S3_PORT, 8791) stands in for R2's S3 API with the reads
  * s3fs makes, over a seeded directory of shared skills and memories; any bucket
@@ -35,24 +40,81 @@ git("init", "--quiet", "--bare", "--initial-branch=main", bare);
 git("-C", bare, "config", "http.receivepack", "true");
 const seed = NodePath.join(root, "seed");
 git("init", "--quiet", "--initial-branch=main", seed);
-NodeFS.writeFileSync(
-  NodePath.join(seed, "README.md"),
-  "# acme/demo\n\nSeeded by the sandbox mock upstream.\n",
-);
-git("-C", seed, "add", "README.md");
-git(
-  "-C",
-  seed,
-  "-c",
-  "user.name=Mock",
-  "-c",
-  "user.email=mock@t3.invalid",
-  "commit",
-  "--quiet",
-  "-m",
-  "seed",
-);
-git("-C", seed, "push", "--quiet", bare, "main");
+/** The workspace's root package.json, depending on `demo-lib` and optionally `demo-extra`. */
+const rootPackage = (extra: boolean) =>
+  `${JSON.stringify(
+    {
+      name: "demo",
+      private: true,
+      packageManager: "pnpm@11.1.1",
+      dependencies: {
+        ...(extra ? { "demo-extra": "workspace:*" } : {}),
+        "demo-lib": "workspace:*",
+      },
+    },
+    null,
+    2,
+  )}\n`;
+/** What pnpm 11.1.1 writes for `rootPackage(extra)`. */
+const lockfile = (extra: boolean) =>
+  [
+    "lockfileVersion: '9.0'",
+    "",
+    "settings:",
+    "  autoInstallPeers: true",
+    "  excludeLinksFromLockfile: false",
+    "",
+    "importers:",
+    "",
+    "  .:",
+    "    dependencies:",
+    ...(extra
+      ? [
+          "      demo-extra:",
+          "        specifier: workspace:*",
+          "        version: link:packages/extra",
+        ]
+      : []),
+    "      demo-lib:",
+    "        specifier: workspace:*",
+    "        version: link:packages/lib",
+    "",
+    "  packages/extra: {}",
+    "",
+    "  packages/lib: {}",
+    "",
+  ].join("\n");
+const SEED: Record<string, string> = {
+  "README.md": "# acme/demo\n\nSeeded by the sandbox mock upstream.\n",
+  "package.json": rootPackage(false),
+  "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
+  "pnpm-lock.yaml": lockfile(false),
+  "packages/lib/package.json": '{ "name": "demo-lib", "version": "1.0.0" }\n',
+  "packages/extra/package.json": '{ "name": "demo-extra", "version": "1.0.0" }\n',
+};
+const commitToMain = (files: Record<string, string>, message: string) => {
+  for (const [path, content] of Object.entries(files)) {
+    NodeFS.mkdirSync(NodePath.dirname(NodePath.join(seed, path)), { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(seed, path), content);
+  }
+  git("-C", seed, "add", "-A");
+  git(
+    "-C",
+    seed,
+    "-c",
+    "user.name=Mock",
+    "-c",
+    "user.email=mock@t3.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    message,
+  );
+  git("-C", seed, "push", "--quiet", bare, "main");
+  return git("-C", seed, "rev-parse", "HEAD");
+};
+commitToMain(SEED, "seed");
+let dependsOnExtra = false;
 
 const s3Port = Number(process.env.MOCK_S3_PORT ?? 8791);
 const shared = NodePath.join(root, "shared");
@@ -258,6 +320,27 @@ const server = NodeHttp.createServer(async (request, response) => {
     );
     return json(response, 200, { ok: true });
   }
+  if (url.pathname === "/__main" && request.method === "POST") {
+    const input = JSON.parse(new TextDecoder().decode(await readBody(request)) || "{}") as {
+      lockfile?: boolean;
+    };
+    if (input.lockfile) dependsOnExtra = !dependsOnExtra;
+    const commit = input.lockfile
+      ? commitToMain(
+          {
+            "package.json": rootPackage(dependsOnExtra),
+            "pnpm-lock.yaml": lockfile(dependsOnExtra),
+          },
+          `${dependsOnExtra ? "depend on" : "drop"} demo-extra`,
+        )
+      : commitToMain(
+          {
+            "README.md": `${NodeFS.readFileSync(NodePath.join(seed, "README.md"), "utf8")}More.\n`,
+          },
+          "touch the README",
+        );
+    return json(response, 200, { commit });
+  }
   if (url.pathname === "/__refs") {
     const refs = git("-C", bare, "for-each-ref", "--format=%(refname) %(objectname)");
     return json(
@@ -299,6 +382,22 @@ const server = NodeHttp.createServer(async (request, response) => {
     return json(response, 200, { ok: true, method: request.method, path });
   }
   if (url.pathname.startsWith("/github/")) return gitHttpBackend(request, response, body);
+  // raw.githubusercontent.com: /<owner>/<repo>/<commit>/<path>
+  const raw = /^\/github-raw\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(url.pathname);
+  if (raw) {
+    try {
+      const content = NodeChildProcess.execFileSync(
+        "git",
+        ["-C", NodePath.join(root, raw[1]!, `${raw[2]}.git`), "show", `${raw[3]}:${raw[4]}`],
+        { stdio: ["ignore", "pipe", "ignore"] },
+      );
+      response.writeHead(200, { "content-type": "text/plain" });
+      return response.end(content);
+    } catch {
+      response.writeHead(404, { "content-type": "text/plain" });
+      return response.end("404: Not Found");
+    }
+  }
   return json(response, 404, { message: "Unknown mock route" });
 });
 

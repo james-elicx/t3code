@@ -3,7 +3,7 @@ import { controlPlane, type ControlPlaneExports, type Env } from "./env.ts";
 import { directory } from "./SandboxDirectory.ts";
 import { isLoopbackHost, parseSandboxPath } from "./routes.ts";
 import { SANDBOX_ID_PATTERN } from "./session.ts";
-import { githubAuthorization } from "./egress/githubPolicy.ts";
+import { fetchRefAdvertisement } from "./github.ts";
 import { parseLaunch, parseRepo } from "./projects.ts";
 import {
   SANDBOX_INSTANCES,
@@ -182,22 +182,9 @@ async function serverConfigApi(
   return text(405, "Use GET.");
 }
 
-/**
- * Why a sandbox couldn't clone the repository, or null when it can. Asks git's
- * smart HTTP endpoint, as the clone does, rather than the REST API: without a
- * token that allows 60 requests an hour per IP, which Workers' shared IPs use up.
- */
+/** Why a sandbox couldn't clone the repository, or null when it can. */
 async function unreadableRepository(env: Env, repo: string): Promise<string | null> {
-  const authorization = githubAuthorization("github.com", env.GITHUB_READ_PAT);
-  const response = await fetch(
-    `${env.GITHUB_ORIGIN}/${repo}.git/info/refs?service=git-upload-pack`,
-    {
-      headers: {
-        "user-agent": "git/2 (t3-sandbox-control)",
-        ...(authorization ? { authorization } : {}),
-      },
-    },
-  );
+  const response = await fetchRefAdvertisement(env, repo);
   await response.body?.cancel();
   if (response.ok) return null;
   // GitHub answers a missing repository, or one the token can't read, with 401 or 404.
@@ -233,8 +220,15 @@ async function projectsApi(
     }
     return text(405, "Use GET or POST.");
   }
-  if (request.method !== "DELETE" || !name) return text(404, "Not found.");
-  await plane.removeProject(`${owner}/${name}`);
+  if (!name) return text(404, "Not found.");
+  const repo = `${owner}/${name}`;
+  if (request.method === "GET") {
+    const project = await plane.project(repo);
+    if (!project) return text(404, `No project ${repo}.`);
+    return Response.json({ ...project, dependencies: await plane.dependencies(repo) });
+  }
+  if (request.method !== "DELETE") return text(405, "Use GET or DELETE.");
+  await plane.removeProject(repo);
   return new Response(null, { status: 204 });
 }
 

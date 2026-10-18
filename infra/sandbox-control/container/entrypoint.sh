@@ -36,6 +36,19 @@ if [ -n "${T3_SANDBOX_PREPARED:-}" ]; then
 fi
 mark prepared
 
+# The control plane's dependency cache builder: the default branch, installed
+# and left in /var/cache/t3-deps for the control plane to save (see deps.sh).
+# It runs no T3 server and no agent.
+if [ -n "${T3_SANDBOX_DEPS_BUILD:-}" ]; then
+  CHECKOUT="/workspace/${T3_SANDBOX_REPO#*/}"
+  if ! git clone --quiet --depth 1 "https://github.com/$T3_SANDBOX_REPO.git" "$CHECKOUT"; then
+    echo "error: could not clone $T3_SANDBOX_REPO" >&2
+    exit 1
+  fi
+  t3-sandbox-deps build "$CHECKOUT"
+  exec sleep infinity
+fi
+
 # Every step below is skipped when a restore or snapshot already did it.
 T3_HOME="${T3CODE_HOME:-/t3home}"
 # A new sandbox starts with the control plane's settings template (the last
@@ -65,6 +78,15 @@ if [ -d /shared/skills ] && { [ -L "$CLAUDE_DIR/skills" ] || [ ! -e "$CLAUDE_DIR
 fi
 if [ -f /shared/memories/MEMORY.md ] && ! grep -qsF "@/shared/memories/MEMORY.md" "$CLAUDE_DIR/CLAUDE.md"; then
   printf '\n# Shared memories (read-only)\n@/shared/memories/MEMORY.md\n' >> "$CLAUDE_DIR/CLAUDE.md"
+fi
+if ! grep -qsF /run/t3-sandbox-deps "$CLAUDE_DIR/CLAUDE.md"; then
+  cat >> "$CLAUDE_DIR/CLAUDE.md" <<'NOTE'
+
+# Dependencies
+The sandbox installs the checkout's dependencies in the background when it
+starts, and pnpm, npx and vp wait for that install to finish. Its state is in
+/run/t3-sandbox-deps and its log in /var/log/t3-sandbox-deps.log.
+NOTE
 fi
 
 # The session repo, cloned through the egress broker. Work happens on the
@@ -102,6 +124,8 @@ else
     nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \
       > /var/log/t3-sandbox-history.log 2>&1 &
   fi
+  # Dependencies, in the background and below T3 in priority (see deps.sh).
+  nice -n 10 t3-sandbox-deps sandbox "$CHECKOUT" > /dev/null 2>&1 &
 fi
 
 # A container that is booting runs no server; a restored home may still hold

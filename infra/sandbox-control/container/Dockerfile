@@ -36,6 +36,16 @@ COPY --from=docker.io/cloudflare/sandbox:1.0.1 /usr/local/bin/sandbox-shim /usr/
 COPY t3-dist/ dist/
 COPY sandbox-settings.json /opt/t3/sandbox-settings.json
 COPY entrypoint.sh /usr/local/bin/t3-sandbox-entrypoint
+# The background dependency install, and the pnpm, npx and vp that wait for it.
+# /opt/t3/toolchain says what a dependency cache built on this image is good
+# for: node_modules holds native builds for this Node and architecture, laid
+# out by this pnpm.
+COPY deps.sh /usr/local/bin/t3-sandbox-deps
+COPY wait-for-deps.sh /opt/t3/bin/wait-for-deps
+RUN chmod +x /usr/local/bin/t3-sandbox-deps /opt/t3/bin/wait-for-deps \
+  && for name in pnpm npx vp; do ln -s wait-for-deps "/opt/t3/bin/$name"; done \
+  && printf 'node %s pnpm %s %s\n' "$(node --version)" "$(pnpm --version)" "$(uname -m)" \
+    > /opt/t3/toolchain
 RUN chmod +x /usr/local/bin/t3-sandbox-entrypoint \
   && mkdir -p /workspace \
   && git config --system user.name "T3 Sandbox" \
@@ -43,6 +53,7 @@ RUN chmod +x /usr/local/bin/t3-sandbox-entrypoint \
   && git config --system init.defaultBranch main
 
 ENV T3CODE_HOME=/t3home
+ENV PATH=/opt/t3/bin:$PATH
 WORKDIR /workspace
 EXPOSE 3773
 ENTRYPOINT ["/usr/local/bin/t3-sandbox-entrypoint"]

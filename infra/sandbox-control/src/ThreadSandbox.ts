@@ -1,6 +1,15 @@
 import { DirectoryBackup, type DirectoryBackupRecord, S3Mount } from "@cloudflare/sandbox";
 import { DurableObject } from "cloudflare:workers";
 
+import {
+  DEPS_BUILD_TIMEOUT_MS,
+  DEPS_CACHE_DIR,
+  DEPS_RESTORED_MARKER,
+  DEPS_STATUS_PATH,
+  depsPrefix,
+  TOOLCHAIN_PATH,
+  type DepsCache,
+} from "./depsCache.ts";
 import { controlPlane, type Env } from "./env.ts";
 import { lifecycleVerdict, type ShellThread } from "./lifecycle.ts";
 import {
@@ -58,6 +67,8 @@ function bootTiming() {
 }
 /** A backstop only: the alarm loop polls the T3 server every tick, which keeps it busy. */
 const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+/** How often a dependency cache builder looks at its install. */
+const DEPS_BUILD_TICK_MS = 10_000;
 const READY_TIMEOUT_MS = 180_000;
 const ACTIVITY_WRITE_INTERVAL_MS = 30_000;
 const CHECKPOINT_EVERY_MS = 30 * 60 * 1000;
@@ -145,6 +156,8 @@ interface SandboxRecord {
   asleep?: boolean;
   /** Boots once without a repository to read the server config, then deletes itself. */
   probe?: boolean;
+  /** Builds its project's dependency cache from the default branch, then deletes itself. */
+  depsBuild?: { startedAt?: string };
   /** The T3 home (T3's database, settings, Claude's transcripts) in R2. */
   backup?: DirectoryBackupRecord;
   /** The whole disk: the checkout, uncommitted work, installed dependencies. */
@@ -217,6 +230,8 @@ export class ThreadSandbox extends DurableObject<Env> {
   private projectBaseline: ProjectConfig | null = null;
   private destroyed = false;
   private lastActivityWrite = 0;
+  /** Backups and restores, one at a time: each holds the container's one backup grant. */
+  private transfers: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -313,6 +328,27 @@ export class ThreadSandbox extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now());
   }
 
+  /** See `SandboxDirectory.checkDeps`. Unlisted; builds from the alarm, then deletes itself. */
+  async buildDeps(id: string, repo: string): Promise<void> {
+    if (await this.record()) return;
+    const { owner, name } = parseRepo(repo);
+    const now = new Date().toISOString();
+    await this.save({
+      threadId: id,
+      title: `Dependency cache for ${owner}/${name}`,
+      repo: { owner, name },
+      baseBranch: "main",
+      branchPrefix: sessionBranchPrefix(id),
+      createdAt: now,
+      instance: "standard-1",
+      lastActivityAt: now,
+      viewedAt: now,
+      pullRequests: [],
+      depsBuild: {},
+    });
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
   async create(input: CreateSandboxInput): Promise<SandboxSummary> {
     const existing = await this.record();
     if (existing && !existing.unstarted) return this.summary(existing);
@@ -327,6 +363,14 @@ export class ThreadSandbox extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const record = await this.record();
     if (!record || record.asleep || record.unstarted) return;
+    if (record.depsBuild) {
+      await this.buildDepsTick(record).catch(async (error: unknown) => {
+        await directory(controlPlane(this.ctx)).depsBuildFailed(repoName(record), String(error));
+        await this.destroy();
+      });
+      if (await this.record()) await this.ctx.storage.setAlarm(Date.now() + DEPS_BUILD_TICK_MS);
+      return;
+    }
     if (record.probe) {
       // The boot stores the server config.
       await this.ready().catch((error: unknown) =>
@@ -347,9 +391,10 @@ export class ThreadSandbox extends DurableObject<Env> {
     }
   }
 
+  /** Null for a sandbox the control plane runs for itself, which nobody may reach. */
   async describe(): Promise<SandboxSummary | null> {
     const record = await this.record();
-    return record ? this.summary(record) : null;
+    return record && !unlisted(record) ? this.summary(record) : null;
   }
 
   async session(): Promise<SandboxSession | null> {
@@ -432,7 +477,7 @@ export class ThreadSandbox extends DurableObject<Env> {
   async destroy(): Promise<void> {
     const record = await this.record();
     // Settings edited since the last tick still become the template.
-    if (record && !record.probe) await this.captureSettingsNow().catch(warnCaptureFailed);
+    if (record && !unlisted(record)) await this.captureSettingsNow().catch(warnCaptureFailed);
     this.destroyed = true;
     await this.destroyContainer("deleted");
     this.booting = null;
@@ -612,11 +657,9 @@ export class ThreadSandbox extends DurableObject<Env> {
    */
   private async checkpoint(record: SandboxRecord): Promise<SandboxRecord> {
     const backups = this.backups(record);
-    const backup = await backups.backup({
-      dir: T3_HOME,
-      name: record.threadId,
-      exclude: BACKUP_EXCLUDE,
-    });
+    const backup = await this.transfer(() =>
+      backups.backup({ dir: T3_HOME, name: record.threadId, exclude: BACKUP_EXCLUDE }),
+    );
     let fresh = await this.requireRecord();
     const previous = fresh.backup;
     fresh.backup = backup;
@@ -670,6 +713,8 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.t3Ready = false;
       this.projectBaseline = null;
       const snapshot = this.usableSnapshot(record);
+      // A snapshot holds the checkout's node_modules; a checkout cloned fresh starts from the cache.
+      const restoresDeps = !snapshot && !record.probe;
       const preparedToken = randomId();
       if (!record.ranAt) await this.setStep(record, "container");
       await this.intercept(record);
@@ -680,6 +725,7 @@ export class ThreadSandbox extends DurableObject<Env> {
         env: {
           ...this.sandboxEnv(record),
           T3_SANDBOX_PREPARED: preparedToken,
+          ...(restoresDeps ? { T3_SANDBOX_DEPS_RESTORE: "1" } : {}),
           ...(record.probe ? { T3_SANDBOX_PROBE: "1" } : {}),
           ...(record.environmentId ? { T3_SANDBOX_ENVIRONMENT_ID: record.environmentId } : {}),
           ...(!record.backup && record.settings ? { T3_SANDBOX_SETTINGS: record.settings } : {}),
@@ -710,6 +756,8 @@ export class ThreadSandbox extends DurableObject<Env> {
         await this.mountShared();
         timing.mark("shared mounted");
         await this.run(["sh", "-c", `printf %s "$0" > ${PREPARED_MARKER}`, preparedToken]);
+        // Alongside the clone and T3 starting; the install waits for it, the thread does not.
+        if (restoresDeps) this.ctx.waitUntil(this.restoreDeps(record));
         if (!record.ranAt) await this.setStep(record, "clone");
       } finally {
         this.phase = null;
@@ -875,13 +923,134 @@ export class ThreadSandbox extends DurableObject<Env> {
   }
 
   /**
+   * Restores the project's dependency cache for the container's background
+   * install (container/deps.sh), then tells it how that went. Without a cache
+   * this image can use, the install starts from nothing, and the directory
+   * builds one for the next sandbox.
+   */
+  private async restoreDeps(record: SandboxRecord) {
+    let outcome = "none";
+    try {
+      const plane = directory(controlPlane(this.ctx));
+      const repo = repoName(record);
+      const [cache, toolchain] = await Promise.all([
+        plane.depsCache(repo),
+        this.output(["cat", TOOLCHAIN_PATH]),
+      ]);
+      if (cache && cache.toolchain === toolchain.trim()) {
+        await this.transfer(() =>
+          this.depsBackups(repo).restore(cache.backup, { dir: DEPS_CACHE_DIR }),
+        );
+        outcome = `restored ${cache.commit}`;
+      } else {
+        this.ctx.waitUntil(
+          plane
+            .checkDeps(repo, { toolchain: toolchain.trim() })
+            .catch((error: unknown) =>
+              console.warn("checking the dependency cache failed", String(error)),
+            ),
+        );
+      }
+    } catch (error) {
+      outcome = "failed";
+      console.warn("restoring the dependency cache failed", String(error));
+    }
+    await this.run(["sh", "-c", `printf '%s\\n' "$0" > ${DEPS_RESTORED_MARKER}`, outcome]).catch(
+      (error: unknown) => console.warn("the dependency install was not told", String(error)),
+    );
+  }
+
+  /**
+   * One step of a dependency cache build: starts the builder container (the
+   * entrypoint clones the default branch and installs), then, once its install
+   * is done, saves the cache and hands it to the directory. Never runs an agent.
+   */
+  private async buildDepsTick(record: SandboxRecord) {
+    const startedAt = record.depsBuild?.startedAt;
+    if (!startedAt) {
+      await this.intercept(record);
+      this.container.start({
+        image: this.image(),
+        enableInternet: false,
+        instance: record.instance,
+        env: { ...this.sandboxEnv(record), T3_SANDBOX_DEPS_BUILD: "1" },
+        labels: { thread: record.threadId.slice(0, 64) },
+      });
+      await this.container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS);
+      record.depsBuild = { startedAt: new Date().toISOString() };
+      await this.save(record);
+      return;
+    }
+    const elapsed = Date.now() - Date.parse(startedAt);
+    const [state] = (await this.output(["cat", DEPS_STATUS_PATH]).catch(() => "")).split(" ");
+    if (state === "done") {
+      const repo = repoName(record);
+      const [lockfile, commit, toolchain] = (
+        await this.output([
+          "sh",
+          "-c",
+          `cd /workspace/${record.repo.name} && sha256sum pnpm-lock.yaml | cut -d' ' -f1 && git rev-parse HEAD && cat ${TOOLCHAIN_PATH}`,
+        ])
+      )
+        .trim()
+        .split("\n");
+      const backup = await this.transfer(() =>
+        this.depsBackups(repo).backup({ dir: DEPS_CACHE_DIR, name: repo }),
+      );
+      const cache: DepsCache = {
+        backup,
+        lockfile: lockfile!,
+        commit: commit!,
+        toolchain: toolchain!,
+        builtAt: new Date().toISOString(),
+      };
+      await directory(controlPlane(this.ctx)).setDepsCache(repo, cache);
+      console.log(
+        "dependency cache built",
+        JSON.stringify({ repo, commit, size: backup.size, ms: elapsed }),
+      );
+      await this.destroy();
+      return;
+    }
+    // The container exits when its clone fails.
+    const lost = !this.container.running && elapsed > 60_000;
+    if (state === "failed" || state === "none" || lost || elapsed > DEPS_BUILD_TIMEOUT_MS) {
+      const log = await this.output(["tail", "-c", "2000", "/var/log/t3-sandbox-deps.log"]).catch(
+        () => "",
+      );
+      const reason =
+        state === "none"
+          ? "The default branch has no pnpm-lock.yaml."
+          : lost
+            ? "The builder container exited; it could not clone the repository."
+            : state === "failed"
+              ? `pnpm install failed:\n${log}`
+              : "The build timed out.";
+      throw new Error(reason);
+    }
+  }
+
+  private depsBackups(repo: string) {
+    return new DirectoryBackup(this.container, controlPlane(this.ctx).DirectoryBackupGateway, {
+      binding: "BACKUPS",
+      prefix: depsPrefix(repo),
+    });
+  }
+
+  private transfer<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.transfers.then(run, run);
+    this.transfers = next.catch(() => {});
+    return next;
+  }
+
+  /**
    * Puts the T3 home back while the entrypoint waits. Restoring over a
    * directory the image or snapshot holds fails on an overlay root (EXDEV), so
    * the old copy goes first; T3 has not started, so nothing holds it open.
    */
   private async restoreHome(record: SandboxRecord, backup: DirectoryBackupRecord) {
     await this.run(["rm", "-rf", T3_HOME]);
-    await this.backups(record).restore(backup, { dir: T3_HOME });
+    await this.transfer(() => this.backups(record).restore(backup, { dir: T3_HOME }));
   }
 
   /**
@@ -983,11 +1152,18 @@ export class ThreadSandbox extends DurableObject<Env> {
     }
   }
 
-  private async run(argv: string[]) {
+  /** A command's stdout; throws when it fails. */
+  private async output(argv: string[]): Promise<string> {
     const output = await (await this.container.exec(argv)).output();
+    const decoder = new TextDecoder();
     if (output.exitCode !== 0) {
-      throw new Error(`${argv[0]} failed: ${new TextDecoder().decode(output.stderr)}`);
+      throw new Error(`${argv[0]} failed: ${decoder.decode(output.stderr)}`);
     }
+    return decoder.decode(output.stdout);
+  }
+
+  private async run(argv: string[]) {
+    await this.output(argv);
   }
 
   private t3Fetch(path: string, token: string, init: RequestInit = {}) {
@@ -1102,7 +1278,7 @@ export class ThreadSandbox extends DurableObject<Env> {
     // A checkpoint or watcher finishing after deletion must not bring the record back.
     if (this.destroyed) return;
     await this.ctx.storage.put("record", record);
-    if (!record.probe) await directory(controlPlane(this.ctx)).upsert(this.summary(record));
+    if (!unlisted(record)) await directory(controlPlane(this.ctx)).upsert(this.summary(record));
   }
 
   private status(record: SandboxRecord): SandboxStatus {
@@ -1152,6 +1328,9 @@ interface ShellProject {
 }
 
 const repoName = (record: SandboxRecord) => `${record.repo.owner}/${record.repo.name}`;
+
+/** Sandboxes the control plane runs for itself: no thread, never listed. */
+const unlisted = (record: SandboxRecord) => record.probe === true || record.depsBuild !== undefined;
 
 const backupPrefix = (record: SandboxRecord) => `${record.threadId}/`;
 

@@ -5,7 +5,10 @@ import type { ThreadSandbox } from "./ThreadSandbox.ts";
 
 export interface Env {
   readonly ASSETS: Fetcher;
-  /** Each sandbox's T3 home, saved when it sleeps and at checkpoints. */
+  /**
+   * Each sandbox's T3 home, saved when it sleeps and at checkpoints, and each
+   * project's dependency cache (under `deps/`).
+   */
   readonly BACKUPS: R2Bucket;
 
   // Secrets, from `.dev.vars` locally and the secrets file when deployed.
@@ -26,12 +29,16 @@ export interface Env {
   /** Upstreams for github.com and api.github.com; overridden by a local mock in dev. */
   readonly GITHUB_ORIGIN: string;
   readonly GITHUB_API_ORIGIN: string;
+  /** raw.githubusercontent.com, for a default branch's lockfile; a mock locally. */
+  readonly GITHUB_RAW_ORIGIN: string;
   /** `"1"` enables `POST /api/sandboxes/:id/exec`, which local proofs use. Never in production. */
   readonly DEBUG_EXEC: string;
   /** How long a settled sandbox stays awake after its last view, in ms. */
   readonly SLEEP_AFTER_MS: string;
   /** How often an awake sandbox's lifecycle alarm runs, in ms. */
   readonly LIFECYCLE_TICK_MS: string;
+  /** How often each project's default branch is checked for a lockfile its dependency cache lacks, in ms. */
+  readonly DEPS_CHECK_MS: string;
   /**
    * The bucket every sandbox mounts read-only at /shared (skills and memories),
    * through R2's S3 API; without all three there is no mount. The keys stay in the Worker,

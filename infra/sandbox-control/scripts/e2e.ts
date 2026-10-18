@@ -59,6 +59,40 @@ interface Recorded {
   stream?: boolean;
 }
 const recorded = async (): Promise<Recorded[]> => (await fetch(`${mock}/__recorded`)).json();
+/** Commits to acme/demo's main as someone else would; see scripts/mock-upstream.ts. */
+const commitToMain = async (body: { lockfile?: boolean }): Promise<string> =>
+  (
+    (await (
+      await fetch(`${mock}/__main`, { method: "POST", body: JSON.stringify(body) })
+    ).json()) as {
+      commit: string;
+    }
+  ).commit;
+interface Dependencies {
+  status: string;
+  commit: string | null;
+  builtAt: string | null;
+  error: string | null;
+}
+const dependencies = async (): Promise<Dependencies> =>
+  ((await api("/projects/acme/demo")) as { dependencies: Dependencies }).dependencies;
+/** Polls the project's dependency cache until `done` says so, or 240s pass. */
+const untilDependencies = async (done: (deps: Dependencies) => boolean) => {
+  const started = Date.now();
+  let deps = await dependencies();
+  while (!done(deps) && Date.now() - started < 240_000) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    deps = await dependencies();
+  }
+  return { deps, seconds: Math.round((Date.now() - started) / 1000) };
+};
+/** Waits for a sandbox's background dependency install to end; its state and log. */
+const installed = async (run: typeof sh) =>
+  run(
+    "for i in $(seq 1 240); do case $(cut -d' ' -f1 /run/t3-sandbox-deps 2>/dev/null) in " +
+      "done|failed|none) break;; esac; sleep 1; done; " +
+      "cut -d' ' -f1 /run/t3-sandbox-deps; cat /var/log/t3-sandbox-deps.log",
+  );
 const refs = async (): Promise<Record<string, string>> => (await fetch(`${mock}/__refs`)).json();
 const basic = (token: string) =>
   `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
@@ -193,6 +227,50 @@ async function main() {
       projects: shell.projects.map(({ id, workspaceRoot }) => ({ id, workspaceRoot })),
       threads: shell.threads.length,
     },
+  );
+
+  // --- Dependencies ----------------------------------------------------------
+  // Adding the project started a build of its dependency cache. This sandbox may
+  // have booted before it finished; either way its own install runs in the background.
+  const firstInstall = await installed(sh);
+  const linked = await sh(
+    "cd /workspace/demo && readlink node_modules/demo-lib && " +
+      '[ "$(cat node_modules/.t3-sandbox-installed)" = "$(sha256sum pnpm-lock.yaml | cut -d\' \' -f1)" ] && echo marked',
+  );
+  check(
+    "the sandbox installs the checkout's dependencies in the background",
+    firstInstall.stdout.startsWith("done\n") && linked.stdout === "../packages/lib\nmarked\n",
+    `${firstInstall.stdout.trim()}\n${linked.stdout.trim()}${linked.stderr}`,
+  );
+
+  const mainHead = (await refs())["refs/heads/main"];
+  const built = await untilDependencies(
+    (deps) => deps.status === "ready" && deps.commit === mainHead,
+  );
+  check(
+    "adding a project builds its dependency cache from the default branch",
+    built.deps.status === "ready" && built.deps.commit === mainHead,
+    `${JSON.stringify(built.deps)} after ${built.seconds}s; main is ${mainHead}`,
+  );
+
+  const waits = await sh(`
+    sleep 3 & printf 'installing %s\\n' $! > /run/t3-sandbox-deps
+    started=$(date +%s); version=$(cd /workspace/demo && pnpm --version 2>/tmp/waited)
+    echo "pnpm $version after $(( $(date +%s) - started ))s: $(cat /tmp/waited)"
+    printf 'done 1\\n' > /run/t3-sandbox-deps
+    tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^PATH=//p'
+    C=$(tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^CLAUDE_CONFIG_DIR=//p')
+    grep -c /run/t3-sandbox-deps "$C/CLAUDE.md"
+  `);
+  const [waitLine, t3Path, noted] = waits.stdout.trim().split("\n");
+  check(
+    "pnpm waits for the background install, on T3's PATH, and Claude is told",
+    /^pnpm 11\.1\.1 after [3-9]s: Waiting for the sandbox to finish installing/.test(
+      waitLine ?? "",
+    ) &&
+      (t3Path ?? "").startsWith("/opt/t3/bin:") &&
+      noted === "1",
+    `${waitLine}\nT3's PATH: ${t3Path}\nCLAUDE.md mentions the install: ${noted}${waits.stderr}`,
   );
 
   // --- Shared skills and memories -------------------------------------------
@@ -420,6 +498,9 @@ async function main() {
       `s.defaultAutoPull=!s.defaultAutoPull;fs.writeFileSync(f,JSON.stringify(s));console.log(s.defaultAutoPull)'`,
   );
   await new Promise((resolve) => setTimeout(resolve, 8000)); // a lifecycle tick or two
+  // The next sandbox's lockfile is newer than the cache it restores.
+  const cachedCommit = (await dependencies()).commit;
+  const changedHead = await commitToMain({ lockfile: true });
   const second = `${threadId}-b`;
   try {
     await api("", {
@@ -450,9 +531,36 @@ async function main() {
       flipped.stdout.trim() !== "" && inherited.stdout.trim() === flipped.stdout.trim(),
       `defaultAutoPull set to ${flipped.stdout.trim()} in ${threadId}; ${second} started with ${inherited.stdout.trim()}`,
     );
+    const secondSh = async (script: string) =>
+      (await api(`/${second}/exec`, {
+        method: "POST",
+        body: JSON.stringify({ argv: ["sh", "-c", script] }),
+      })) as { exitCode: number; stdout: string; stderr: string };
+    const delta = await installed(secondSh);
+    check(
+      "a sandbox restores the cache and installs only what its newer lockfile changed",
+      delta.stdout.startsWith(`done\ndependency cache: restored ${cachedCommit}\n`) &&
+        /^[+-] demo-extra /m.test(delta.stdout),
+      delta.stdout.trim(),
+    );
   } finally {
     await api(`/${second}`, { method: "DELETE" }).catch(() => {});
   }
+
+  const rebuiltCache = await untilDependencies((deps) => deps.commit === changedHead);
+  check(
+    "a lockfile change on the default branch rebuilds the cache",
+    rebuiltCache.deps.status === "ready" && rebuiltCache.deps.commit === changedHead,
+    `${JSON.stringify(rebuiltCache.deps)} ${rebuiltCache.seconds}s after the change`,
+  );
+  await commitToMain({});
+  await new Promise((resolve) => setTimeout(resolve, 25_000)); // two checks
+  const unchanged = await dependencies();
+  check(
+    "a commit that leaves the lockfile alone builds nothing",
+    unchanged.status === "ready" && unchanged.builtAt === rebuiltCache.deps.builtAt,
+    `${JSON.stringify(unchanged)} 25s after a README-only commit`,
+  );
 
   // --- Sleep and wake ------------------------------------------------------
   clearInterval(viewing);
