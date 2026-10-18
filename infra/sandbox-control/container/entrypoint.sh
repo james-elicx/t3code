@@ -119,10 +119,12 @@ else
       mark branch
     fi
   fi
-  # History and dependencies arrive in the background, once the control plane
-  # has heard from T3: their disk writes would slow its start. Until then the
-  # status says installing, so pnpm, npx and vp wait (see deps.sh). (Polling T3
-  # from here never succeeded once deployed.)
+  # Dependencies install in the background from the start, onto the control
+  # plane's cache when it restores one; pnpm, npx and vp wait (see deps.sh). Its
+  # summary goes to the container's log.
+  nice -n 10 t3-sandbox-deps sandbox "$CHECKOUT" > /dev/null &
+  # History arrives once the control plane has heard from T3: the fetch would
+  # slow its start. (Polling T3 from here never succeeded once deployed.)
   (
     waited=0
     until [ "$(cat /run/t3-sandbox-answered 2>/dev/null)" = "${T3_SANDBOX_PREPARED:-}" ] ||
@@ -133,11 +135,9 @@ else
     # Also when a snapshot caught the checkout before its history arrived.
     if [ -f "$CHECKOUT/.git/shallow" ]; then
       nice -n 19 git -C "$CHECKOUT" fetch --quiet --unshallow origin \
-        > /var/log/t3-sandbox-history.log 2>&1 &
+        > /var/log/t3-sandbox-history.log 2>&1
     fi
-    nice -n 10 t3-sandbox-deps sandbox "$CHECKOUT" > /dev/null 2>&1
   ) &
-  printf 'installing %s\n' "$!" > /run/t3-sandbox-deps
 fi
 
 # A container that is booting runs no server; a restored home may still hold

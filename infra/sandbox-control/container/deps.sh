@@ -24,6 +24,17 @@ export T3_SANDBOX_DEPS_INSTALLER=1
 # `<state> <pid>`: the wrappers wait while the state is restoring or installing
 # and this process is alive, so a snapshot taken mid-install does not wedge them.
 status() { printf '%s %s\n' "$1" "$$" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"; }
+status installing
+started=$(date +%s)
+cache=none
+waited=0
+# How it ended and where the time went, on stderr (the container's log) and in the log.
+finish() {
+  status "$1"
+  summary="dependencies $1 after $(($(date +%s) - started))s (cache: $cache, ${waited}s waiting for it; pnpm install: ${installed:-0}s)"
+  echo "$summary" >> "$LOG"
+  echo "t3-sandbox-deps: $summary" >&2
+}
 
 # Every node_modules below $1 that is not inside another, relative to $1.
 modules() { (cd "$1" && find . -path ./.git -prune -o -type d -name node_modules -prune -print); }
@@ -48,7 +59,9 @@ if [ "$MODE" = sandbox ]; then
       sleep 0.1
       waited=$((waited + 1))
     done
-    echo "dependency cache: $(cat "$RESTORED" 2>/dev/null || echo 'timed out')" >> "$LOG"
+    cache=$(cat "$RESTORED" 2>/dev/null || echo 'timed out')
+    waited=$(($(date +%s) - started))
+    echo "dependency cache: $cache after ${waited}s" >> "$LOG"
     if [ "$(cut -d' ' -f1 "$RESTORED" 2>/dev/null)" = restored ]; then
       modules "$CACHE" | while read -r dir; do
         # A workspace package this commit no longer has gets none.
@@ -65,10 +78,13 @@ status installing
 cd "$CHECKOUT" || exit 1
 # Even onto a restored cache: the repo's own install scripts (builds of its
 # workspace packages, say) produce files outside node_modules.
+install_started=$(date +%s)
 if ! pnpm install --frozen-lockfile --prefer-offline >> "$LOG" 2>&1; then
-  status failed
+  installed=$(($(date +%s) - install_started))
+  finish failed
   exit 1
 fi
+installed=$(($(date +%s) - install_started))
 if [ "$MODE" = build ]; then
   rm -rf "$CACHE"
   mkdir -p "$CACHE"
@@ -79,4 +95,4 @@ if [ "$MODE" = build ]; then
 else
   printf '%s\n' "$lock" > "$INSTALLED"
 fi
-status done
+finish done

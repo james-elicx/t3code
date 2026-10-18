@@ -549,7 +549,7 @@ async function main() {
     const delta = await installed(secondSh);
     check(
       "a sandbox restores the cache and installs only what its newer lockfile changed",
-      delta.stdout.startsWith(`done\ndependency cache: restored ${cachedCommit}\n`) &&
+      delta.stdout.startsWith(`done\ndependency cache: restored ${cachedCommit} after `) &&
         /^[+-] demo-extra /m.test(delta.stdout),
       delta.stdout.trim(),
     );
