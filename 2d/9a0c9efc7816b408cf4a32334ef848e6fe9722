@@ -1,0 +1,19 @@
+infra/sandbox-control/container/Dockerfile
+  s_927e0e23985343::t_77230dbbac7d69 24-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2d9a0c9efc7816b408cf4a32334ef848e6fe9722",
+  "prompts": {},
+  "sessions": {
+    "s_927e0e23985343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8c195271-e058-4d02-bb51-9ce43b3f925d",
+        "model": "unknown"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
