@@ -79,9 +79,18 @@ const SNAPSHOT_TTL_MS = 29 * 24 * 60 * 60 * 1000;
  * the container snapshot and the session branch carry; caches rebuild.
  */
 const BACKUP_EXCLUDE = ["/worktrees/", "/caches/", "/claude/shell-snapshots/", "/claude/skills"];
-/** Sizes a sandbox may ask for. One today; the toggle will offer more. */
-export const SANDBOX_INSTANCES = ["standard-1"] as const;
+/**
+ * Sizes a sandbox may ask for; the first is the default. One today; the toggle
+ * will offer more. Half a vCPU (standard-1) made T3, Claude Code and git crawl.
+ */
+export const SANDBOX_INSTANCES = ["standard-2"] as const;
 export type SandboxInstance = (typeof SANDBOX_INSTANCES)[number];
+const DEFAULT_INSTANCE: SandboxInstance = SANDBOX_INSTANCES[0];
+
+/** A sandbox's size: one recorded on a size no longer offered boots on the default. */
+function instanceOf(record: SandboxRecord): SandboxInstance {
+  return SANDBOX_INSTANCES.includes(record.instance) ? record.instance : DEFAULT_INSTANCE;
+}
 
 /**
  * Stand-ins the sandbox holds instead of credentials. Tools see a key and use
@@ -268,7 +277,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       baseBranch: input.baseBranch ?? "main",
       branchPrefix: sessionBranchPrefix(input.threadId),
       createdAt: now,
-      instance: "standard-1",
+      instance: DEFAULT_INSTANCE,
       lastActivityAt: now,
       viewedAt: now,
       pullRequests: [],
@@ -283,7 +292,8 @@ export class ThreadSandbox extends DurableObject<Env> {
   async start(input: StartSandboxInput): Promise<SandboxSummary> {
     const record = await this.requireRecord();
     if (!record.unstarted) return this.summary(record);
-    const instance = input.instance ?? record.instance;
+    // An unstarted sandbox's size is only the default it was allocated with.
+    const instance = input.instance ?? DEFAULT_INSTANCE;
     if (!SANDBOX_INSTANCES.includes(instance)) throw new Error(`Unknown instance ${instance}.`);
     const plane = directory(controlPlane(this.ctx));
     await plane.captureRunningSettings();
@@ -318,7 +328,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       baseBranch: "main",
       branchPrefix: sessionBranchPrefix(id),
       createdAt: now,
-      instance: "standard-1",
+      instance: DEFAULT_INSTANCE,
       lastActivityAt: now,
       viewedAt: now,
       pullRequests: [],
@@ -340,7 +350,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       baseBranch: "main",
       branchPrefix: sessionBranchPrefix(id),
       createdAt: now,
-      instance: "standard-1",
+      instance: DEFAULT_INSTANCE,
       lastActivityAt: now,
       viewedAt: now,
       pullRequests: [],
@@ -721,7 +731,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.container.start({
         ...(snapshot ? { containerSnapshot: { id: snapshot } } : { image: this.image() }),
         enableInternet: false,
-        instance: record.instance,
+        instance: instanceOf(record),
         env: {
           ...this.sandboxEnv(record),
           T3_SANDBOX_PREPARED: preparedToken,
@@ -972,7 +982,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       this.container.start({
         image: this.image(),
         enableInternet: false,
-        instance: record.instance,
+        instance: instanceOf(record),
         env: { ...this.sandboxEnv(record), T3_SANDBOX_DEPS_BUILD: "1" },
         labels: { thread: record.threadId.slice(0, 64) },
       });
@@ -1298,7 +1308,7 @@ export class ThreadSandbox extends DurableObject<Env> {
       branchPrefix: record.branchPrefix,
       pullRequests: record.pullRequests,
       environmentId: record.environmentId ?? null,
-      instance: record.instance,
+      instance: instanceOf(record),
       projectId: sandboxProjectId(record.repo),
       savedAt: record.savedAt ?? null,
       lastActivityAt: record.lastActivityAt,

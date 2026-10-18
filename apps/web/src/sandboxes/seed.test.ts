@@ -20,7 +20,7 @@ const sandbox = (overrides: Partial<SandboxEntry> = {}): SandboxEntry => ({
   status: "unstarted",
   repo: "acme/Demo",
   projectId: "sandbox:acme/demo",
-  instance: "standard-1",
+  instance: "standard-2",
   environmentId: "env-slot",
   lastError: null,
   ranAt: null,

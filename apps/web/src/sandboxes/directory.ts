@@ -53,7 +53,7 @@ export interface SandboxPendingThread {
 }
 
 /** Sizes a sandbox may ask for. One today; the toggle lists each. */
-export const SANDBOX_INSTANCES = ["standard-1"] as const;
+export const SANDBOX_INSTANCES = ["standard-2"] as const;
 export type SandboxInstance = (typeof SANDBOX_INSTANCES)[number];
 
 /** A sandbox as the control plane's directory lists it. */
