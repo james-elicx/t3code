@@ -1,0 +1,21 @@
+apps/web/src/components/DiffPanel.tsx
+  s_13b5c149ad88e3::t_ea8e4965b4d25e 1152
+apps/web/src/components/pullRequest/PullRequestCodeTab.tsx
+  s_13b5c149ad88e3::t_9cc74293093c0d 1473
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd5bef88d85b1191dc2d6a4257ed97dbebcb4178",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/web/src/components/pullRequest/PullRequestGhosts.tsx
+  s_13b5c149ad88e3::t_b70dff68862362 148,153,175,184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2be3b18f00ce85dc3f5ecf16ffbb4137c2128342",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

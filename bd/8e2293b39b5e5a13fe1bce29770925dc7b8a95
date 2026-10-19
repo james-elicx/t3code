@@ -1,0 +1,27 @@
+apps/web/src/components/DiffPanel.tsx
+  s_13b5c149ad88e3::t_c11c3c4b62e30a 40,489-490
+apps/web/src/components/pullRequest/PullRequestCodeTab.tsx
+  s_13b5c149ad88e3::t_bed4c1d0117407 48,50,620-621,635
+apps/web/src/components/settings/SettingsPanels.tsx
+  s_13b5c149ad88e3::t_2605397c7bb7be 2505
+apps/web/src/lib/diffRendering.ts
+  s_13b5c149ad88e3::t_d07d189b8517a9 62-64
+apps/web/src/components/pullRequest/PullRequestDetailPanel.tsx
+  s_13b5c149ad88e3::t_24b26ab36df07b 1597-1598,1638,1639,1667-1668,1690,1735-1764,1766-1768,1770-1774,1776,2287-2296,2300-2302,2303-2315,2328,2330,2332,2404,2409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd8e2293b39b5e5a13fe1bce29770925dc7b8a95",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

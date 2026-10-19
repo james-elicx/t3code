@@ -1,0 +1,19 @@
+apps/web/src/components/Sidebar.tsx
+  s_13b5c149ad88e3::t_aa60b00bef997d 4355-4357,4359,4363-4390,4392-4400,4402-4403,4404-4407,4409-4412,4413-4431,4432-4511
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "920f6e901752ce102cfe630b2277d399d54eda3b",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

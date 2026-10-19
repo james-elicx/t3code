@@ -1,0 +1,19 @@
+apps/web/src/components/GitActionsControl.tsx
+  s_2373f9a80c90f2::t_70c81348301498 1697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8eea65d5b4d4113f1f38f151a537132eebc64246",
+  "prompts": {},
+  "sessions": {
+    "s_2373f9a80c90f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7109dc4-003f-4ecd-b756-b3a021c80f7e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
