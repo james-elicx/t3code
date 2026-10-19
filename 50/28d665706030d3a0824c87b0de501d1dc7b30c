@@ -1,0 +1,19 @@
+apps/web/src/components/CommandPalette.tsx
+  s_2373f9a80c90f2::t_737cf2c6245dc8 2529,2547,2549,2565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5028d665706030d3a0824c87b0de501d1dc7b30c",
+  "prompts": {},
+  "sessions": {
+    "s_2373f9a80c90f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7109dc4-003f-4ecd-b756-b3a021c80f7e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
