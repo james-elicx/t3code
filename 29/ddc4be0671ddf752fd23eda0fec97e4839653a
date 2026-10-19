@@ -1,0 +1,29 @@
+apps/web/src/components/CommandPalette.logic.test.ts
+  s_8543ad69f4712e::t_48570725562c9b 853-877
+apps/web/src/components/CommandPalette.logic.ts
+  s_2373f9a80c90f2::t_77ac7ddad4ea85 458-464
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "29ddc4be0671ddf752fd23eda0fec97e4839653a",
+  "prompts": {},
+  "sessions": {
+    "s_2373f9a80c90f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7109dc4-003f-4ecd-b756-b3a021c80f7e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    },
+    "s_8543ad69f4712e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "037a8807-1bd1-496a-93cb-42b97e4b92ec",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

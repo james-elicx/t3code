@@ -1,0 +1,27 @@
+apps/web/src/components/diffs/DiffFileTree.tsx
+  s_13b5c149ad88e3::t_0c9e1d9344dcd8 60,67,69,76-77,82,86,88-89,91,97,104,111-127,129-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eb0e7e56c6764cb9de7b75856c2d7c38f2820561",
+  "prompts": {},
+  "sessions": {
+    "s_13b5c149ad88e3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f191ee15-7702-4f75-acd2-a6081ebad0c3",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    },
+    "s_cdad1616d6febb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08e496fa-8139-4338-8c27-86a56d25c157",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}

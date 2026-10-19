@@ -1,0 +1,19 @@
+README.md
+  s_b3a8cc0d1d55c3::t_8eca4e87a4d36e 137-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16dcf5e7b71d01a01b85771b43a47dfa25d75e78",
+  "prompts": {},
+  "sessions": {
+    "s_b3a8cc0d1d55c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "414bb87b-8857-42cf-b59f-d8988a64ce94",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
