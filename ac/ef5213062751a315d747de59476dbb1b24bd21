@@ -1,0 +1,21 @@
+apps/server/src/provider/ClaudeModelCatalog.test.ts
+  s_2373f9a80c90f2::t_ecfe7fc9db5612 121-153
+apps/server/src/provider/ClaudeModelCatalog.ts
+  s_2373f9a80c90f2::t_e2b3b817b1e8bb 275-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "acef5213062751a315d747de59476dbb1b24bd21",
+  "prompts": {},
+  "sessions": {
+    "s_2373f9a80c90f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7109dc4-003f-4ecd-b756-b3a021c80f7e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
