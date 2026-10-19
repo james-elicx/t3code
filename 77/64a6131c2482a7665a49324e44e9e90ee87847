@@ -1,0 +1,19 @@
+apps/web/src/routes/_chat.pull-requests.tsx
+  s_2373f9a80c90f2::t_3bbfcf90af0b1a 812
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7764a6131c2482a7665a49324e44e9e90ee87847",
+  "prompts": {},
+  "sessions": {
+    "s_2373f9a80c90f2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7109dc4-003f-4ecd-b756-b3a021c80f7e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "James <james@eli.cx>"
+    }
+  }
+}
